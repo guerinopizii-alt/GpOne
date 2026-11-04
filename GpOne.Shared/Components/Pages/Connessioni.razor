@@ -1,0 +1,103 @@
+@page "/connessioni"
+@inject ConnectionProfileStore Store
+@inject UserSessionService Sessione
+
+<PageTitle>Connessioni</PageTitle>
+
+<h1><span class="bi bi-plug me-2" aria-hidden="true"></span>Connessioni</h1>
+
+@if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+{
+    <div class="alert alert-warning">Sezione riservata agli amministratori.</div>
+}
+else if (inModifica)
+{
+    <div class="card">
+        <div class="card-body">
+            <h2 class="h5 mb-3">@(selezionato is null ? "Nuovo profilo" : $"Modifica '{selezionato.Nome}'")</h2>
+            <ProfiloConnessioneForm Profilo="selezionato" OnSaved="Chiudi" OnCancel="Chiudi" />
+        </div>
+    </div>
+}
+else
+{
+    <p class="text-muted">Le password sono salvate cifrate e non vengono mai mostrate.</p>
+
+    <button class="btn btn-primary mb-3" @onclick="() => Apri(null)">
+        <span class="bi bi-plus-lg me-1" aria-hidden="true"></span>Nuovo profilo
+    </button>
+
+    @if (errore is not null)
+    {
+        <div class="alert alert-danger">@errore</div>
+    }
+
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                <th>Nome</th>
+                <th>Server</th>
+                <th>Database</th>
+                <th>Utente</th>
+                <th>Password</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var profilo in Store.Elenco)
+            {
+                <tr>
+                    <td>
+                        @profilo.Nome
+                        @if (string.Equals(profilo.Nome, Sessione.Profilo, StringComparison.OrdinalIgnoreCase))
+                        {
+                            <span class="badge text-bg-success ms-1">in uso</span>
+                        }
+                    </td>
+                    <td>@profilo.Server</td>
+                    <td>@profilo.Database</td>
+                    <td>@profilo.Utente</td>
+                    <td>••••••••</td>
+                    <td class="text-end">
+                        <button class="btn btn-sm btn-outline-secondary" title="Modifica" @onclick="() => Apri(profilo)">
+                            <span class="bi bi-pencil" aria-hidden="true"></span>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" title="Elimina" @onclick="() => Elimina(profilo)">
+                            <span class="bi bi-trash" aria-hidden="true"></span>
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private ProfiloConnessione? selezionato;
+    private bool inModifica;
+    private string? errore;
+
+    private void Apri(ProfiloConnessione? profilo)
+    {
+        selezionato = profilo;
+        inModifica = true;
+        errore = null;
+    }
+
+    private void Chiudi()
+    {
+        selezionato = null;
+        inModifica = false;
+    }
+
+    private void Elimina(ProfiloConnessione profilo)
+    {
+        errore = null;
+        if (string.Equals(profilo.Nome, Sessione.Profilo, StringComparison.OrdinalIgnoreCase))
+        {
+            errore = "Non è possibile eliminare il profilo in uso.";
+            return;
+        }
+        Store.Elimina(profilo.Nome);
+    }
+}

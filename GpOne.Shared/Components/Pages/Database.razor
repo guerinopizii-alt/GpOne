@@ -1,0 +1,41 @@
+@page "/database"
+@inject ConnectionProfileStore Store
+@inject UserSessionService Sessione
+
+<PageTitle>Database</PageTitle>
+
+<h1><span class="bi bi-database-gear me-2" aria-hidden="true"></span>Database</h1>
+
+@if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+{
+    <div class="alert alert-warning">Sezione riservata agli amministratori.</div>
+}
+else
+{
+    <p class="text-muted">Crea il database se non esiste ed esegue gli script di aggiornamento non ancora applicati.</p>
+
+    <div class="mb-3" style="max-width: 320px;">
+        <label class="form-label" for="profilo">Profilo di connessione</label>
+        <select id="profilo" class="form-select" @bind="profilo">
+            @foreach (var nome in Store.Nomi)
+            {
+                <option value="@nome">@nome</option>
+            }
+        </select>
+    </div>
+
+    @if (!string.IsNullOrEmpty(profilo))
+    {
+        @* @key ricrea il componente al cambio di profilo *@
+        <InizializzaDatabase @key="profilo" Profilo="@profilo" />
+    }
+}
+
+@code {
+    private string? profilo;
+
+    protected override void OnInitialized()
+    {
+        profilo = Sessione.Profilo ?? Store.Nomi.FirstOrDefault();
+    }
+}

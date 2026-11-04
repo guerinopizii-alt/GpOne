@@ -1,0 +1,584 @@
+﻿@page "/gpone-ai"
+@page "/copilot"
+@using GpOne.Services
+@implements IAsyncDisposable
+@inject IAiChatService AiChat
+@inject AiSettingsStore AiStore
+@inject DatiAiService DatiAi
+@inject DomandeAiService DomandeAi
+@inject LogInviiService LogInvii
+@inject Microsoft365CopilotService Microsoft365
+@inject ConversazioniService Conversazioni
+@inject IJSRuntime JS
+
+<PageTitle>GpOne AI</PageTitle>
+
+@if (!AiStore.Abilitato)
+{
+    <h1>GpOne AI</h1>
+    <div class="alert alert-warning">@(AiStore.Avviso ?? "Non sei abilitato all'uso di GpOne AI: chiedi all'amministratore.")</div>
+    return;
+}
+
+<div class="ai-chat-container">
+    <div class="ai-chat-header">
+        <div>
+            <h1 class="mb-0">GpOne AI</h1>
+            <small class="text-muted"><span class="bi bi-cpu me-1" aria-hidden="true"></span>@AiStore.Correnti.Descrizione</small>
+        </div>
+        @if (domande.Count > 0)
+        {
+            <select @key="@($"domande-{chiaveSelezione}")" class="form-select form-select-sm ms-auto me-3" style="max-width: 280px;"
+                    @onchange="UsaDomandaAsync" disabled="@isBusy">
+                <option value="">Domande preparate…</option>
+                @foreach (var domanda in domande)
+                {
+                    <option value="@domanda.Id">@domanda.Titolo</option>
+                }
+            </select>
+        }
+        @if (avvisoDomande is not null)
+        {
+            <span class="small text-warning ms-auto me-3">@avvisoDomande</span>
+        }
+        @* Domande libere sui dati: disponibili solo se abilitate dall'amministratore (Sistema > Intelligenza AI) *@
+        @if (AiStore.Correnti.DatiLiberi)
+        {
+            <div class="form-check form-switch @(domande.Count > 0 ? "" : "ms-auto") me-3 mb-0">
+                <input class="form-check-input" type="checkbox" id="usaDb" @bind="usaDatabase" disabled="@isBusy" />
+                <label class="form-check-label small" for="usaDb">Usa dati del database</label>
+            </div>
+        }
+        @if (conversazioni.Count > 0)
+        {
+            <select @key="@($"conversazioni-{chiaveConversazioni}")" class="form-select form-select-sm me-2" style="max-width: 240px;"
+                    @onchange="ApriConversazioneAsync" disabled="@isBusy" title="Conversazioni precedenti">
+                <option value="">Conversazioni…</option>
+                @foreach (var conversazione in conversazioni)
+                {
+                    <option value="@conversazione.Id" selected="@(conversazione.Id == conversazioneId)">
+                        @conversazione.DataModifica.ToString("dd/MM HH:mm") – @conversazione.Titolo
+                    </option>
+                }
+            </select>
+        }
+        @if (conversazioneId is not null)
+        {
+            <button class="btn btn-outline-danger btn-sm me-2" title="Elimina questa conversazione" @onclick="EliminaConversazioneAsync" disabled="@isBusy">
+                <span class="bi bi-trash" aria-hidden="true"></span>
+            </button>
+        }
+        <button class="btn btn-outline-secondary btn-sm" @onclick="NewConversation" disabled="@isBusy">
+            Nuova conversazione
+        </button>
+    </div>
+
+    @if (AiStore.Correnti.Provider == AiProvider.Microsoft365Copilot)
+    {
+        <div class="alert @(Microsoft365.IsConnesso ? "alert-light" : "alert-warning") d-flex flex-wrap align-items-center gap-2 py-2">
+            @if (Microsoft365.IsConnesso)
+            {
+                <span class="small"><span class="bi bi-microsoft me-1" aria-hidden="true"></span>Connesso come @Microsoft365.NomeAccount</span>
+                <button type="button" class="btn btn-link btn-sm ms-auto" @onclick="Microsoft365.Esci">Disconnetti</button>
+            }
+            else if (istruzioniAccesso is not null)
+            {
+                <span class="small">@istruzioniAccesso</span>
+            }
+            else
+            {
+                <span class="small">Per usare Microsoft 365 Copilot accedi con il tuo account aziendale.</span>
+                <button type="button" class="btn btn-primary btn-sm ms-auto" @onclick="AccediMicrosoftAsync">
+                    @(Microsoft365.AccessoWindows ? "Accedi con l'account di Windows" : "Accedi con Microsoft")
+                </button>
+            }
+        </div>
+    }
+
+    @if (avvisoLimite is not null)
+    {
+        <div class="alert alert-warning d-flex flex-wrap align-items-center gap-2 py-2">
+            <span class="small"><span class="bi bi-exclamation-triangle me-1" aria-hidden="true"></span>@avvisoLimite</span>
+            <button type="button" class="btn btn-warning btn-sm ms-auto" @onclick="ConfermaInvioAsync" disabled="@isBusy">Invia comunque</button>
+            <button type="button" class="btn btn-link btn-sm" @onclick="AnnullaInvio">Annulla</button>
+        </div>
+    }
+
+    @if (domandaInAttesa is not null)
+    {
+        <div class="card mb-2">
+            <div class="card-body py-2">
+                <div class="small fw-semibold mb-2">@domandaInAttesa.Titolo</div>
+                <div class="row g-2">
+                    @foreach (var nome in DomandeAiService.Parametri(domandaInAttesa))
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0">@nome</label>
+                            <input class="form-control form-control-sm" type="@(nome.Contains("Data", StringComparison.OrdinalIgnoreCase) ? "date" : "text")"
+                                   value="@valoriParametri.GetValueOrDefault(nome)" @onchange="e => valoriParametri[nome] = e.Value?.ToString() ?? string.Empty" />
+                        </div>
+                    }
+                </div>
+                <div class="mt-2 d-flex gap-2">
+                    <button type="button" class="btn btn-primary btn-sm" @onclick="InviaDomandaConParametriAsync" disabled="@isBusy">Invia</button>
+                    <button type="button" class="btn btn-link btn-sm" @onclick="() => domandaInAttesa = null">Annulla</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="ai-chat-messages">
+        @if (messages.Count == 0)
+        {
+            <div class="ai-chat-empty">
+                <p class="lead">Come posso aiutarti?</p>
+                <div class="ai-chat-suggestions">
+                    @foreach (var suggestion in suggestions)
+                    {
+                        <button class="btn btn-light" @onclick="() => SendAsync(suggestion)">@suggestion</button>
+                    }
+                </div>
+            </div>
+        }
+
+        @foreach (var message in messages)
+        {
+            <div class="ai-chat-message @(message.Role == ChatRole.User ? "user" : "assistant")">
+                <div class="ai-chat-bubble">@message.Text</div>
+                @if (message.Dettagli is not null)
+                {
+                    <details class="small text-muted mt-1">
+                        <summary>Dati dal database</summary>
+                        <pre class="small mb-0" style="white-space: pre-wrap;">@message.Dettagli</pre>
+                    </details>
+                }
+                @if (message.Tempi is not null)
+                {
+                    <small class="text-muted d-block" title="Tempo di lettura dei dati, attesa della prima risposta e tempo totale">
+                        <span class="bi bi-stopwatch me-1" aria-hidden="true"></span>@message.Tempi.Descrizione
+                    </small>
+                }
+                <small class="text-muted">
+                    @message.Timestamp.ToString("HH:mm")
+                    @if (message.Role == ChatRole.Assistant)
+                    {
+                        <button type="button" class="btn btn-link btn-sm p-0 ms-2 align-baseline" title="Copia la risposta" @onclick="() => CopiaAsync(message)">
+                            <span class="bi bi-clipboard" aria-hidden="true"></span> Copia
+                        </button>
+                        @if (message.Dettagli is not null)
+                        {
+                            <button type="button" class="btn btn-link btn-sm p-0 ms-2 align-baseline" title="Scarica i dati in CSV" @onclick="() => EsportaDatiAsync(message)">
+                                <span class="bi bi-download" aria-hidden="true"></span> Esporta dati
+                            </button>
+                        }
+                    }
+                </small>
+            </div>
+        }
+
+        @if (isBusy)
+        {
+            <div class="ai-chat-message assistant">
+                <div class="ai-chat-bubble">
+                    @if (string.IsNullOrEmpty(streamingText))
+                    {
+                        <span class="ai-chat-typing">@(statoDatabase ?? "GpOne AI sta scrivendo…")</span>
+                    }
+                    else
+                    {
+                        @streamingText
+                    }
+                </div>
+            </div>
+        }
+
+        @if (errorMessage is not null)
+        {
+            <div class="alert alert-danger">@errorMessage</div>
+        }
+    </div>
+
+    <form class="ai-chat-input" @onsubmit="() => SendAsync(input)">
+        <input class="form-control" placeholder="Scrivi un messaggio…" autocomplete="off"
+               @bind="input" @bind:event="oninput" disabled="@isBusy" />
+        @if (isBusy)
+        {
+            <button type="button" class="btn btn-outline-danger" @onclick="Stop">Interrompi</button>
+        }
+        else
+        {
+            <button type="submit" class="btn btn-primary" disabled="@string.IsNullOrWhiteSpace(input)">Invia</button>
+        }
+    </form>
+</div>
+
+@code {
+    private readonly List<ChatMessage> messages = [];
+    private readonly string[] suggestions =
+    [
+        "Riassumi i documenti di oggi",
+        "Aiutami a scrivere una email",
+        "Cosa puoi fare?"
+    ];
+
+    private string input = string.Empty;
+    private string streamingText = string.Empty;
+    private string? errorMessage;
+    private bool isBusy;
+    private bool usaDatabase;
+    private IReadOnlyList<DomandaAi> domande = [];
+    private DomandaAi? domandaScelta;
+    private DomandaAi? domandaInAttesa;
+    private string? avvisoDomande;
+    private Dictionary<string, string> valoriParametri = [];
+    private IReadOnlyDictionary<string, string>? valoriScelti;
+    private int chiaveSelezione;
+    private string? statoDatabase;
+    private CancellationTokenSource? cts;
+
+    /// <summary>Richiesta pronta per il motore AI, con i dati già letti e la stima dei token.</summary>
+    private sealed record InvioPreparato(ChatMessage Domanda, IReadOnlyList<ChatMessage> Messaggi, string? Dettagli, string? Query, long MsDati, int Token);
+
+    private InvioPreparato? invioSospeso;
+    private string? avvisoLimite;
+
+    private async Task SendAsync(string text)
+    {
+        if (isBusy || string.IsNullOrWhiteSpace(text))
+            return;
+
+        errorMessage = null;
+        invioSospeso = null;
+        avvisoLimite = null;
+        var domandaUtente = new ChatMessage(ChatRole.User, text.Trim(), DateTime.Now);
+        messages.Add(domandaUtente);
+        input = string.Empty;
+        streamingText = string.Empty;
+        isBusy = true;
+        cts = new CancellationTokenSource();
+        await SalvaMessaggioAsync(domandaUtente);
+
+        // 1. Preparazione: eventuale lettura dei dati dal database
+        var cronometro = System.Diagnostics.Stopwatch.StartNew();
+        InvioPreparato? preparato = null;
+        try
+        {
+            IReadOnlyList<ChatMessage> daInviare = messages;
+            string? dettagli = null;
+            string? query = null;
+            var datiLiberi = usaDatabase && AiStore.Correnti.DatiLiberi;
+            if (domandaScelta is not null || datiLiberi)
+            {
+                statoDatabase = "Consulto il database…";
+                StateHasChanged();
+                var contesto = domandaScelta is not null
+                    ? await DomandeAi.PreparaAsync(domandaScelta, messages, cts.Token, valoriScelti)
+                    : await DatiAi.PreparaAsync(messages, cts.Token);
+                daInviare = contesto.Messaggi;
+                dettagli = contesto.Dettagli;
+                query = contesto.Query;
+            }
+            preparato = new InvioPreparato(domandaUtente, daInviare, dettagli, query, cronometro.ElapsedMilliseconds, StimaToken(daInviare));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Errore durante la preparazione dei dati: {ex.Message}";
+        }
+        finally
+        {
+            statoDatabase = null;
+            domandaScelta = null;
+            valoriScelti = null;
+            isBusy = false;
+            cts.Dispose();
+            cts = null;
+        }
+        if (preparato is null)
+            return;
+
+        // 2. Controllo della capacità del motore prima di inviare
+        var limite = AiStore.Correnti.LimiteTokenMotore;
+        if (preparato.Token > limite)
+        {
+            invioSospeso = preparato;
+            avvisoLimite = $"La richiesta è stimata in circa {preparato.Token:N0} token, oltre la capacità del motore ({limite:N0} token): " +
+                           "potrebbe essere rifiutata o letta solo in parte. Riduci i dati (filtri, totali, meno righe) oppure invia comunque.";
+            return;
+        }
+
+        // 3. Invio
+        await RispondiAsync(preparato);
+    }
+
+    // Stima prudente dei token (circa 3 caratteri per token: numeri e dati tabellari ne usano di più) di istruzioni, conversazione e dati
+    private int StimaToken(IReadOnlyList<ChatMessage> daInviare) =>
+        (int)Math.Min(int.MaxValue, ((long)AiStore.Correnti.SystemPrompt.Length + daInviare.Sum(m => (long)m.Text.Length)) / 3 + 1);
+
+    private async Task ConfermaInvioAsync()
+    {
+        if (invioSospeso is not { } preparato)
+            return;
+        invioSospeso = null;
+        avvisoLimite = null;
+        await RispondiAsync(preparato);
+    }
+
+    private void AnnullaInvio()
+    {
+        invioSospeso = null;
+        avvisoLimite = null;
+    }
+
+    private async Task RispondiAsync(InvioPreparato preparato)
+    {
+        isBusy = true;
+        streamingText = string.Empty;
+        cts = new CancellationTokenSource();
+        var cronometro = System.Diagnostics.Stopwatch.StartNew();
+        long? msPrimaRisposta = null;
+        try
+        {
+            await foreach (var chunk in AiChat.GetResponseStreamAsync(preparato.Messaggi, cts.Token))
+            {
+                msPrimaRisposta ??= cronometro.ElapsedMilliseconds;
+                streamingText += chunk;
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            streamingText += " [interrotto]";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Errore durante la comunicazione con GpOne AI: {ex.Message}";
+        }
+        finally
+        {
+            // Il totale esclude l'eventuale attesa della conferma dell'utente
+            var caratteri = preparato.Messaggi[^1].Text.Length;
+            var tempi = new TempiAi(preparato.MsDati, msPrimaRisposta, preparato.MsDati + cronometro.ElapsedMilliseconds, caratteri);
+
+            // Registro degli invii (chi, cosa, a quale motore, con quali query e in quanto tempo)
+            await LogInvii.RegistraAsync(AiStore.Correnti.Descrizione, preparato.Domanda.Text, preparato.Query, caratteri, tempi);
+
+            if (!string.IsNullOrWhiteSpace(streamingText))
+            {
+                var risposta = new ChatMessage(ChatRole.Assistant, streamingText.Trim(), DateTime.Now, preparato.Dettagli, tempi);
+                messages.Add(risposta);
+                await SalvaMessaggioAsync(risposta);
+            }
+
+            streamingText = string.Empty;
+            isBusy = false;
+            cts.Dispose();
+            cts = null;
+        }
+    }
+
+    private void Stop() => cts?.Cancel();
+
+    private string? istruzioniAccesso;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            domande = await DomandeAi.ElencoPerUtenteAsync();
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+        {
+            // Domande preparate non disponibili: la chat funziona comunque, ma si mostra il motivo
+            domande = [];
+            avvisoDomande = ex is Microsoft.Data.SqlClient.SqlException { Number: 207 or 208 }
+                ? "Domande preparate non disponibili: eseguire gli script da Sistema > Database."
+                : $"Domande preparate non disponibili: {ex.Message}";
+        }
+        await AggiornaConversazioniAsync();
+    }
+
+    private async Task UsaDomandaAsync(ChangeEventArgs e)
+    {
+        chiaveSelezione++;
+        if (!int.TryParse(e.Value?.ToString(), out var id) || domande.FirstOrDefault(d => d.Id == id) is not { } domanda)
+            return;
+
+        // Domanda con parametri: prima l'utente compila i valori
+        if (DomandeAiService.Parametri(domanda).Count > 0)
+        {
+            domandaInAttesa = domanda;
+            valoriParametri = [];
+            return;
+        }
+
+        domandaScelta = domanda;
+        await SendAsync(domanda.Testo);
+    }
+
+    private async Task InviaDomandaConParametriAsync()
+    {
+        if (domandaInAttesa is not { } domanda)
+            return;
+
+        domandaScelta = domanda;
+        valoriScelti = new Dictionary<string, string>(valoriParametri, StringComparer.OrdinalIgnoreCase);
+        domandaInAttesa = null;
+        await SendAsync(DomandeAiService.ApplicaParametri(domanda.Testo, valoriScelti));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Desktop: accesso automatico con l'account aziendale del PC.
+        // Un errore qui non deve mai interrompere l'app (altrimenti la navigazione si blocca).
+        if (!firstRender || AiStore.Correnti.Provider != AiProvider.Microsoft365Copilot
+            || !Microsoft365.AccessoWindows || Microsoft365.IsConnesso)
+            return;
+        try
+        {
+            if (await Microsoft365.AccessoAutomaticoAsync())
+                StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Accesso automatico a Microsoft non riuscito: {ex.Message}";
+            StateHasChanged();
+        }
+    }
+
+    private async Task AccediMicrosoftAsync()
+    {
+        errorMessage = null;
+        try
+        {
+            await Microsoft365.AccediAsync(async istruzioni =>
+            {
+                istruzioniAccesso = istruzioni;
+                await InvokeAsync(StateHasChanged);
+            });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            errorMessage = $"Accesso a Microsoft non riuscito: {ex.Message}";
+        }
+        finally
+        {
+            istruzioniAccesso = null;
+        }
+    }
+
+    private void NewConversation()
+    {
+        messages.Clear();
+        errorMessage = null;
+        conversazioneId = null;
+        chiaveConversazioni++;
+    }
+
+    // ---- Storico conversazioni: se il database non è aggiornato la chat funziona comunque, senza salvare ----
+
+    private IReadOnlyList<ConversazioneInfo> conversazioni = [];
+    private int? conversazioneId;
+    private int chiaveConversazioni;
+    private bool storicoDisponibile = true;
+
+    private async Task AggiornaConversazioniAsync()
+    {
+        if (!storicoDisponibile)
+            return;
+        try
+        {
+            conversazioni = await Conversazioni.ElencoAsync();
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+        {
+            storicoDisponibile = false;
+            conversazioni = [];
+        }
+    }
+
+    private async Task SalvaMessaggioAsync(ChatMessage messaggio)
+    {
+        if (!storicoDisponibile)
+            return;
+        try
+        {
+            var nuova = conversazioneId is null;
+            conversazioneId ??= await Conversazioni.CreaAsync(messaggio.Text, AiStore.Correnti.Descrizione);
+            await Conversazioni.AggiungiMessaggioAsync(conversazioneId.Value, messaggio);
+            if (nuova)
+                await AggiornaConversazioniAsync();
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+        {
+            storicoDisponibile = false;
+        }
+    }
+
+    private async Task ApriConversazioneAsync(ChangeEventArgs e)
+    {
+        chiaveConversazioni++;
+        if (!int.TryParse(e.Value?.ToString(), out var id))
+            return;
+        try
+        {
+            var caricati = await Conversazioni.MessaggiAsync(id);
+            messages.Clear();
+            messages.AddRange(caricati);
+            conversazioneId = id;
+            errorMessage = null;
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+        {
+            errorMessage = $"Impossibile aprire la conversazione: {ex.Message}";
+        }
+    }
+
+    private async Task EliminaConversazioneAsync()
+    {
+        if (conversazioneId is not { } id)
+            return;
+        try
+        {
+            await Conversazioni.EliminaAsync(id);
+            NewConversation();
+            await AggiornaConversazioniAsync();
+        }
+        catch (Exception ex) when (ex is Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+        {
+            errorMessage = $"Impossibile eliminare la conversazione: {ex.Message}";
+        }
+    }
+
+    // ---- Esportazione ----
+
+    private IJSObjectReference? moduloJs;
+
+    private async Task CopiaAsync(ChatMessage messaggio) =>
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", messaggio.Text);
+
+    private async Task EsportaDatiAsync(ChatMessage messaggio)
+    {
+        moduloJs ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/GpOne.Shared/gpone.js");
+        await moduloJs.InvokeVoidAsync("scaricaFile",
+            $"gpone-ai-dati-{messaggio.Timestamp:yyyyMMdd-HHmm}.csv", messaggio.Dettagli, "text/csv;charset=utf-8");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        cts?.Cancel();
+        if (moduloJs is not null)
+        {
+            try
+            {
+                await moduloJs.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuito già chiuso: niente da rilasciare
+            }
+        }
+    }
+}

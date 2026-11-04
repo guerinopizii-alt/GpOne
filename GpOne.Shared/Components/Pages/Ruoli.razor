@@ -1,0 +1,166 @@
+@page "/ruoli"
+@using Microsoft.Data.SqlClient
+@inject UtentiService Servizio
+@inject UserSessionService Sessione
+
+<PageTitle>Ruoli</PageTitle>
+
+<h1><span class="bi bi-shield-lock me-2" aria-hidden="true"></span>Ruoli</h1>
+
+@if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+{
+    <div class="alert alert-warning">Sezione riservata agli amministratori.</div>
+    return;
+}
+
+@if (messaggio is not null)
+{
+    <div class="alert @(esitoPositivo ? "alert-success" : "alert-danger")">@messaggio</div>
+}
+
+@if (inModifica is null)
+{
+    <button class="btn btn-primary mb-3" @onclick="() => Apri(new RuoloGestione())"><span class="bi bi-plus-lg me-1" aria-hidden="true"></span>Nuovo ruolo</button>
+
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr><th>Codice</th><th>Descrizione</th><th class="text-end">Utenti</th><th class="text-end">Permessi</th><th>Stato</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var ruolo in ruoli)
+            {
+                <tr>
+                    <td>@ruolo.Codice</td>
+                    <td class="small">@ruolo.Descrizione</td>
+                    <td class="text-end">@ruolo.NumeroUtenti</td>
+                    <td class="text-end">@ruolo.Permessi.Count</td>
+                    <td><span class="badge @(ruolo.Attivo ? "text-bg-success" : "text-bg-secondary")">@(ruolo.Attivo ? "Attivo" : "Disattivato")</span></td>
+                    <td class="text-end text-nowrap">
+                        <button class="btn btn-sm btn-outline-secondary" title="Modifica" @onclick="() => Apri(ruolo)"><span class="bi bi-pencil" aria-hidden="true"></span></button>
+                        <button class="btn btn-sm btn-outline-danger" title="Elimina" @onclick="() => EliminaAsync(ruolo)"
+                                disabled="@(ruolo.NumeroUtenti > 0 || ruolo.Codice == UserSessionService.RuoloAmministratore)"><span class="bi bi-trash" aria-hidden="true"></span></button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else
+{
+    <div class="card" style="max-width: 760px;">
+        <div class="card-body">
+            <h2 class="h5 mb-3">@(inModifica.Id == 0 ? "Nuovo ruolo" : $"Modifica {inModifica.Codice}")</h2>
+            <div class="row g-2">
+                <div class="col-md-5 mb-2">
+                    <label class="form-label small">Codice</label>
+                    <input class="form-control" @bind="inModifica.Codice" disabled="@(inModifica.Codice == UserSessionService.RuoloAmministratore && inModifica.Id != 0)" />
+                </div>
+                <div class="col-md-7 mb-2">
+                    <label class="form-label small">Descrizione</label>
+                    <input class="form-control" @bind="inModifica.Descrizione" />
+                </div>
+            </div>
+            <div class="form-check my-2">
+                <input id="attivo" type="checkbox" class="form-check-input" @bind="inModifica.Attivo" />
+                <label class="form-check-label" for="attivo">Ruolo attivo</label>
+            </div>
+
+            @if (permessi.Count > 0)
+            {
+                <h3 class="h6 mt-3">Permessi</h3>
+                @foreach (var area in permessi.GroupBy(p => p.Area))
+                {
+                    <div class="mb-2">
+                        <div class="small fw-semibold">@area.Key</div>
+                        @foreach (var permesso in area)
+                        {
+                            <div class="form-check">
+                                <input id="@($"perm-{permesso.Codice}")" type="checkbox" class="form-check-input" checked="@inModifica.Permessi.Contains(permesso.Codice)"
+                                       @onchange="e => { inModifica.Permessi.Remove(permesso.Codice); if (e.Value is true) inModifica.Permessi.Add(permesso.Codice); }" />
+                                <label class="form-check-label small" for="@($"perm-{permesso.Codice}")">@permesso.Codice <span class="text-muted">– @permesso.Descrizione</span></label>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="form-text mb-2">Permessi non disponibili: eseguire lo script 02 da Sistema &gt; Database.</div>
+            }
+
+            <div class="d-flex gap-2 mt-3">
+                <button class="btn btn-primary" @onclick="SalvaAsync" disabled="@isBusy">Salva</button>
+                <button class="btn btn-link" @onclick="() => inModifica = null">Annulla</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<RuoloGestione> ruoli = [];
+    private IReadOnlyList<Permesso> permessi = [];
+    private RuoloGestione? inModifica;
+    private string? messaggio;
+    private bool esitoPositivo;
+    private bool isBusy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+            await EseguiAsync(async () =>
+            {
+                ruoli = await Servizio.RuoliAsync();
+                permessi = await Servizio.PermessiAsync();
+            });
+    }
+
+    private void Apri(RuoloGestione ruolo)
+    {
+        inModifica = new RuoloGestione
+        {
+            Id = ruolo.Id, Codice = ruolo.Codice, Descrizione = ruolo.Descrizione, Attivo = ruolo.Attivo,
+            NumeroUtenti = ruolo.NumeroUtenti, Permessi = [.. ruolo.Permessi]
+        };
+        messaggio = null;
+    }
+
+    private async Task SalvaAsync()
+    {
+        if (string.IsNullOrWhiteSpace(inModifica!.Codice))
+        {
+            (esitoPositivo, messaggio) = (false, "Indicare il codice del ruolo.");
+            return;
+        }
+        await EseguiAsync(async () =>
+        {
+            await Servizio.SalvaRuoloAsync(inModifica);
+            inModifica = null;
+            ruoli = await Servizio.RuoliAsync();
+            (esitoPositivo, messaggio) = (true, "Ruolo salvato.");
+        });
+    }
+
+    private Task EliminaAsync(RuoloGestione ruolo) => EseguiAsync(async () =>
+    {
+        await Servizio.EliminaRuoloAsync(ruolo);
+        ruoli = await Servizio.RuoliAsync();
+        (esitoPositivo, messaggio) = (true, $"Ruolo {ruolo.Codice} eliminato.");
+    });
+
+    private async Task EseguiAsync(Func<Task> azione)
+    {
+        isBusy = true;
+        try
+        {
+            await azione();
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            (esitoPositivo, messaggio) = (false, ex.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+}

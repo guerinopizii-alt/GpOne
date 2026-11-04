@@ -1,4 +1,8 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
+﻿@inject UserSessionService Sessione
+@inject AiSettingsStore AiStore
+@implements IDisposable
+
+<div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
         <a class="navbar-brand" href="">GpOne</a>
     </div>
@@ -8,23 +12,85 @@
 
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
     <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
-                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
-            </NavLink>
-        </div>
+        @foreach (var group in sections)
+        {
+            var voci = group.Items.Where(i => (i.Ruolo is null || Sessione.IsInRole(i.Ruolo)) && (i.Href != "gpone-ai" || AiStore.Abilitato)).ToList();
+            if (voci.Count == 0)
+                continue;
+            var aperta = !chiuse.Contains(group.Title);
 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="counter">
-                <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Counter
-            </NavLink>
-        </div>
+            @* Il titolo apre/chiude la sezione; stopPropagation evita di richiudere il menu su schermi piccoli *@
+            <button type="button" class="nav-section nav-section-toggle" aria-expanded="@aperta"
+                    @onclick="() => Commuta(group.Title)" @onclick:stopPropagation="true">
+                <span>@group.Title</span>
+                <span class="bi @(aperta ? "bi-chevron-down" : "bi-chevron-right") ms-auto" aria-hidden="true"></span>
+            </button>
 
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="weather">
-                <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Weather
-            </NavLink>
-        </div>
+            @if (!aperta)
+                continue;
+
+            @foreach (var item in voci)
+            {
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="@item.Href" Match="@(item.Href == "" ? NavLinkMatch.All : NavLinkMatch.Prefix)">
+                        <span class="bi @item.Icon" aria-hidden="true"></span> @item.Title
+                    </NavLink>
+                </div>
+            }
+        }
     </nav>
 </div>
 
+@code {
+    private record MenuItem(string Title, string Href, string Icon, string? Ruolo = null);
+
+    protected override void OnInitialized() => AiStore.Changed += OnAiChanged;
+
+    private void OnAiChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => AiStore.Changed -= OnAiChanged;
+
+    // Sezioni chiuse: lo stato resta durante la navigazione (il menu vive nel layout)
+    private readonly HashSet<string> chiuse = [];
+
+    private void Commuta(string sezione)
+    {
+        if (!chiuse.Remove(sezione))
+            chiuse.Add(sezione);
+    }
+    private record MenuSection(string Title, MenuItem[] Items);
+
+    private readonly MenuSection[] sections =
+    [
+        new("Generale",
+        [
+            new("Home", "", "bi-house-door"),
+            new("GpOne AI", "gpone-ai", "bi-stars"),
+        ]),
+        new("Gestione",
+        [
+            new("Clienti", "clienti", "bi-people"),
+            new("Documenti", "documenti", "bi-folder2-open"),
+            new("Attività", "attivita", "bi-check2-square"),
+            new("Calendario", "calendario", "bi-calendar3"),
+        ]),
+        new("Analisi",
+        [
+            new("Report", "report", "bi-bar-chart-line"),
+        ]),
+        new("Sistema",
+        [
+            new("Utenti", "utenti", "bi-person-gear", UserSessionService.RuoloAmministratore),
+            new("Ruoli", "ruoli", "bi-shield-lock", UserSessionService.RuoloAmministratore),
+            new("Connessioni", "connessioni", "bi-plug", UserSessionService.RuoloAmministratore),
+            new("Database", "database", "bi-database-gear", UserSessionService.RuoloAmministratore),
+            new("Intelligenza AI", "intelligenza-artificiale", "bi-cpu", UserSessionService.RuoloAmministratore),
+            new("Dati per AI", "dati-ai", "bi-table", UserSessionService.RuoloAmministratore),
+            new("Domande AI", "domande-ai", "bi-chat-square-text", UserSessionService.RuoloAmministratore),
+            new("Registro AI", "registro-ai", "bi-journal-text", UserSessionService.RuoloAmministratore),
+            new("Copia tabelle", "copia-tabelle", "bi-files", UserSessionService.RuoloAmministratore),
+            new("Report e dashboard", "report-dashboard", "bi-easel", UserSessionService.RuoloAmministratore),
+            new("Impostazioni", "impostazioni", "bi-gear"),
+        ]),
+    ];
+}

@@ -1,0 +1,127 @@
+@page "/report-dashboard"
+@using DevExpress.DashboardBlazor
+@using DevExpress.DashboardWeb
+@using Microsoft.Extensions.DependencyInjection
+@implements IDisposable
+@inject UserSessionService Sessione
+@inject DashboardAccessi Accessi
+@inject IServiceProvider Servizi
+
+<PageTitle>Report e dashboard</PageTitle>
+
+<h1><span class="bi bi-easel me-2" aria-hidden="true"></span>Report e dashboard</h1>
+
+@if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+{
+    <div class="alert alert-warning">Sezione riservata agli amministratori.</div>
+    return;
+}
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <button class="nav-link @(scheda == Scheda.Dashboard ? "active" : null)" @onclick="() => scheda = Scheda.Dashboard">Dashboard</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link @(scheda == Scheda.Report ? "active" : null)" @onclick="() => scheda = Scheda.Report">Report</button>
+    </li>
+</ul>
+
+@if (scheda == Scheda.Dashboard)
+{
+    @if (opzioni is null)
+    {
+        <div class="alert alert-info">Il designer delle dashboard è disponibile nella versione web di GpOne.</div>
+    }
+    else
+    {
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <select class="form-select form-select-sm" style="max-width: 320px;" value="@dashboardId" @onchange="Apri">
+                <option value="">Nuova dashboard…</option>
+                @foreach (var voce in elenco)
+                {
+                    <option value="@voce.Id">@voce.Titolo</option>
+                }
+            </select>
+            @if (!string.IsNullOrEmpty(dashboardId))
+            {
+                <button class="btn btn-sm btn-outline-danger" @onclick="Elimina"><span class="bi bi-trash me-1" aria-hidden="true"></span>Elimina</button>
+            }
+            <button class="btn btn-sm btn-outline-secondary" @onclick="Aggiorna"><span class="bi bi-arrow-clockwise me-1" aria-hidden="true"></span>Aggiorna elenco</button>
+            <span class="small text-muted ms-auto">Le dashboard salvate qui sono visibili a tutti nella Home.</span>
+        </div>
+        @if (messaggio is not null)
+        {
+            <div class="alert alert-info py-2 small">@messaggio</div>
+        }
+
+        @* @key ricrea il designer quando si cambia dashboard *@
+        <DxDashboard @key="@($"designer-{dashboardId}-{versione}")"
+                     Endpoint="@opzioni.EndpointProgettazione"
+                     InitialDashboardId="@dashboardId"
+                     WorkingMode="WorkingMode.Designer"
+                     style="width: 100%; height: calc(100vh - 14rem);">
+            <DxBackendOptions RequestHttpHeaders="@intestazioni" />
+        </DxDashboard>
+    }
+}
+else
+{
+    <div class="alert alert-warning">
+        <p class="mb-2"><strong>Designer dei report DevExpress non ancora installato.</strong></p>
+        <p class="mb-0">
+            Serve il pacchetto <code>DevExpress.Blazor.Reporting.JSBasedControls</code> 25.1.3, che non è presente su questo PC.
+            Configurando il feed NuGet di DevExpress (indirizzo personale da devexpress.com) si potrà installare e
+            in questa scheda comparirà il designer per creare e modificare i report.
+        </p>
+    </div>
+}
+
+@code {
+    private enum Scheda { Dashboard, Report }
+
+    private Scheda scheda = Scheda.Dashboard;
+    private DashboardOpzioni? opzioni;
+    private IReadOnlyList<DashboardOpzioni.Voce> elenco = [];
+    private string? dashboardId;
+    private string? messaggio;
+    private int versione;
+    private string? codice;
+    private Dictionary<string, string> intestazioni = [];
+
+    protected override void OnInitialized()
+    {
+        opzioni = Servizi.GetService<DashboardOpzioni>();
+        if (opzioni is null || !Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+            return;
+
+        codice = Accessi.Crea(amministratore: true);
+        intestazioni = new() { [DashboardOpzioni.Intestazione] = codice };
+        elenco = opzioni.Elenco();
+    }
+
+    private void Apri(ChangeEventArgs e)
+    {
+        dashboardId = e.Value?.ToString() is { Length: > 0 } id ? id : null;
+        messaggio = null;
+    }
+
+    private void Aggiorna()
+    {
+        elenco = opzioni!.Elenco();
+        messaggio = $"Dashboard salvate: {elenco.Count}.";
+    }
+
+    private void Elimina()
+    {
+        // Il nome del file è l'Id assegnato dall'archivio: si elimina solo dentro la cartella delle dashboard
+        var file = Path.Combine(opzioni!.Cartella, $"{Path.GetFileName(dashboardId)}.xml");
+        if (File.Exists(file))
+            File.Delete(file);
+        messaggio = "Dashboard eliminata.";
+        dashboardId = null;
+        versione++;
+        elenco = opzioni.Elenco();
+    }
+
+    public void Dispose() => Accessi.Revoca(codice);
+}

@@ -1,0 +1,14 @@
+<PageTitle>@Title</PageTitle>
+
+<h1><span class="bi @Icon me-2" aria-hidden="true"></span>@Title</h1>
+<p class="text-muted">@Description</p>
+
+<div class="alert alert-info">
+    Sezione in costruzione.
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Icon { get; set; } = string.Empty;
+    [Parameter] public string Description { get; set; } = string.Empty;
+}

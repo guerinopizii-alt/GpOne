@@ -1,0 +1,61 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="stylesheet" href="@Assets["_content/GpOne.Shared/lib/bootstrap/dist/css/bootstrap.min.css"]" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="_content/DevExpress.Blazor.Dashboard/ace.css" />
+    <link rel="stylesheet" href="_content/DevExpress.Blazor.Dashboard/dx.light.css" />
+    <link rel="stylesheet" href="_content/DevExpress.Blazor.Dashboard/dx-analytics.common.css" />
+    <link rel="stylesheet" href="_content/DevExpress.Blazor.Dashboard/dx-analytics.light.css" />
+    <link rel="stylesheet" href="_content/DevExpress.Blazor.Dashboard/dx-querybuilder.css" />
+    <link rel="stylesheet" href="_content/DevExpress.Blazor.Dashboard/dx-dashboard.light.min.css" />
+    <link rel="stylesheet" href="@Assets["_content/GpOne.Shared/app.css"]" />
+    <link rel="stylesheet" href="@Assets["GpOne.Web.styles.css"]" />
+    <ImportMap />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet @rendermode="PageRenderMode" />
+</head>
+
+<body>
+    <div id="splash" class="splash" aria-hidden="true">
+        <div class="splash-content">
+            <div class="splash-logo">GpOne AI</div>
+            <div class="splash-spinner"></div>
+        </div>
+    </div>
+    <script>
+        // La splash viene mostrata solo al primo caricamento della sessione
+        if (sessionStorage.getItem('gpone-splash-shown')) {
+            document.getElementById('splash').remove();
+        }
+    </script>
+
+    <Routes @rendermode="PageRenderMode" />
+    <script src="_framework/blazor.web.js" autostart="false"></script>
+    <script>
+        const splashMinDuration = new Promise(resolve => setTimeout(resolve, 1500));
+
+        Blazor.start().then(() => splashMinDuration).then(() => {
+            const splash = document.getElementById('splash');
+            if (!splash) return;
+            sessionStorage.setItem('gpone-splash-shown', '1');
+            splash.classList.add('splash-hide');
+            splash.addEventListener('transitionend', () => splash.remove(), { once: true });
+        });
+    </script>
+</body>
+
+</html>
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    // Interattività globale, tranne per le pagine escluse (es. Error)
+    private IComponentRenderMode? PageRenderMode =>
+        HttpContext.AcceptsInteractiveRouting() ? InteractiveServer : null;
+}

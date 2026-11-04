@@ -1,0 +1,36 @@
+@page "/configurazione"
+@layout GpOne.Components.Layout.EmptyLayout
+@inject ConnectionProfileStore Store
+@inject NavigationManager Navigation
+
+<PageTitle>Configurazione iniziale</PageTitle>
+
+@* Disponibile solo finché non esiste alcun profilo: poi connessioni e database si gestiscono dal menu Sistema (amministratori) *@
+<div class="login-page">
+    <div class="setup-card card shadow">
+        <div class="card-body p-4">
+            <h1 class="h3 mb-1"><span class="bi bi-plug me-2" aria-hidden="true"></span>GpOne</h1>
+
+            @if (profiloCreato is null)
+            {
+                <p class="text-muted mb-4">Configurazione iniziale – passo 1 di 2: definisci la connessione al database.</p>
+                <ProfiloConnessioneForm OnSaved="@(nome => profiloCreato = nome)" />
+            }
+            else
+            {
+                <p class="text-muted mb-4">Configurazione iniziale – passo 2 di 2: crea e aggiorna il database.</p>
+                <InizializzaDatabase Profilo="@profiloCreato" OnCompleted="@(() => Navigation.NavigateTo("login"))" />
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string? profiloCreato;
+
+    protected override void OnInitialized()
+    {
+        if (Store.Nomi.Count > 0)
+            Navigation.NavigateTo("login");
+    }
+}

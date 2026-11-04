@@ -482,3 +482,6 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Profili di connessione e chiavi di cifratura GpOne
+App_Data/

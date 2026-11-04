@@ -1,7 +1,88 @@
 ﻿@page "/"
+@using DevExpress.DashboardBlazor
+@using DevExpress.DashboardWeb
+@using Microsoft.Extensions.DependencyInjection
+@implements IDisposable
+@inject UserSessionService Sessione
+@inject DashboardAccessi Accessi
+@inject IServiceProvider Servizi
 
 <PageTitle>Home</PageTitle>
 
-<h1>Hello, world!</h1>
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <h1 class="h3 mb-0 me-auto">Benvenuto in GpOne</h1>
+    @if (opzioni is not null)
+    {
+        <select class="form-select form-select-sm" style="max-width: 300px;" value="@dashboardId" @onchange="CambiaDashboard">
+            <option value="">Scegli una dashboard…</option>
+            @foreach (var voce in elenco)
+            {
+                <option value="@voce.Id">@voce.Titolo</option>
+            }
+        </select>
+    }
+</div>
 
-Welcome to your new app.
+@if (opzioni is null)
+{
+    <div class="alert alert-info">Le dashboard sono disponibili nella versione web di GpOne.</div>
+}
+else if (progettazione || !string.IsNullOrEmpty(dashboardId))
+{
+    @* @key ricrea il componente quando cambiano dashboard o modalità *@
+    <DxDashboard @key="@($"{progettazione}-{dashboardId}")"
+                 Endpoint="@(progettazione ? opzioni.EndpointProgettazione : opzioni.Endpoint)"
+                 InitialDashboardId="@dashboardId"
+                 WorkingMode="@(progettazione ? WorkingMode.Designer : WorkingMode.ViewerOnly)"
+                 style="width: 100%; height: calc(100vh - 11rem);">
+        <DxBackendOptions RequestHttpHeaders="@intestazioni" />
+    </DxDashboard>
+}
+else
+{
+    <p class="text-muted">
+        @(elenco.Count == 0
+            ? "Non ci sono ancora dashboard."
+            : "Scegli una dashboard dall'elenco.")
+        @if (Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+        {
+            <span> Puoi crearle in <a href="report-dashboard">Sistema &gt; Report e dashboard</a>.</span>
+        }
+    </p>
+}
+
+@code {
+    private DashboardOpzioni? opzioni;
+    private IReadOnlyList<DashboardOpzioni.Voce> elenco = [];
+    private string? dashboardId;
+    private bool progettazione;
+    private string? codice;
+    private Dictionary<string, string> intestazioni = [];
+
+    protected override void OnInitialized()
+    {
+        // Nell'app desktop non c'è il server delle dashboard
+        opzioni = Servizi.GetService<DashboardOpzioni>();
+        if (opzioni is null || !Sessione.IsAuthenticated)
+            return;
+
+        // Nella Home solo visualizzazione: la modifica è in Sistema > Report e dashboard
+        codice = Accessi.Crea(amministratore: false);
+        intestazioni = new() { [DashboardOpzioni.Intestazione] = codice };
+        elenco = opzioni.Elenco();
+        dashboardId = elenco.FirstOrDefault()?.Id;
+    }
+
+    private void CambiaDashboard(ChangeEventArgs e) =>
+        dashboardId = e.Value?.ToString() is { Length: > 0 } id ? id : null;
+
+    private void CambiaModalita(ChangeEventArgs e)
+    {
+        progettazione = e.Value is true;
+        // Uscendo dal designer si aggiorna l'elenco (nuove dashboard salvate)
+        if (!progettazione && opzioni is not null)
+            elenco = opzioni.Elenco();
+    }
+
+    public void Dispose() => Accessi.Revoca(codice);
+}

@@ -1,0 +1,73 @@
+﻿@page "/registro-ai"
+@using Microsoft.Data.SqlClient
+@inject LogInviiService Registro
+@inject UserSessionService Sessione
+
+<PageTitle>Registro AI</PageTitle>
+
+<h1><span class="bi bi-journal-text me-2" aria-hidden="true"></span>Registro AI</h1>
+
+@if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+{
+    <div class="alert alert-warning">Sezione riservata agli amministratori.</div>
+    return;
+}
+
+<p class="text-muted">Ultimi 200 invii a GpOne AI: chi ha chiesto cosa, a quale motore e con quali query sui dati, con i tempi di lettura dei dati e di risposta. I dati letti non vengono registrati.</p>
+
+@if (errore is not null)
+{
+    <div class="alert alert-danger">@errore</div>
+}
+
+<table class="table table-sm align-middle">
+    <thead>
+        <tr><th>Data</th><th>Utente</th><th>Motore</th><th>Domanda</th><th>Dati</th><th class="text-end">Caratteri</th><th class="text-end">Lettura dati</th><th class="text-end">1ª risposta</th><th class="text-end">Totale</th></tr>
+    </thead>
+    <tbody>
+        @foreach (var invio in invii)
+        {
+            <tr>
+                <td class="small text-nowrap">@invio.DataOra.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
+                <td class="small">@invio.Username</td>
+                <td class="small">@invio.Motore</td>
+                <td class="small">@(invio.Domanda.Length > 200 ? invio.Domanda[..200] + "…" : invio.Domanda)</td>
+                <td class="small">
+                    @if (invio.Query is not null)
+                    {
+                        <details><summary>Query</summary><pre class="small mb-0" style="white-space: pre-wrap;">@invio.Query</pre></details>
+                    }
+                </td>
+                <td class="small text-end">@invio.Caratteri.ToString("N0")</td>
+                <td class="small text-end text-nowrap">@Secondi(invio.MsDati)</td>
+                <td class="small text-end text-nowrap">@Secondi(invio.MsPrimaRisposta)</td>
+                <td class="small text-end text-nowrap">@Secondi(invio.MsTotale)</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private IReadOnlyList<InvioAi> invii = [];
+
+    private static string Secondi(int? ms) => ms is { } valore ? $"{valore / 1000.0:0.0} s" : "–";
+    private string? errore;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+            return;
+        try
+        {
+            invii = await Registro.UltimiAsync();
+        }
+        catch (SqlException ex) when (ex.Number == 208)
+        {
+            errore = "Database da aggiornare: eseguire gli script da Sistema > Database.";
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            errore = ex.Message;
+        }
+    }
+}

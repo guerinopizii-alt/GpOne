@@ -1,0 +1,210 @@
+﻿@page "/copia-tabelle"
+@using Microsoft.Data.SqlClient
+@implements IDisposable
+@inject CopiaTabelleService Copia
+@inject UserSessionService Sessione
+
+<PageTitle>Copia tabelle</PageTitle>
+
+<h1><span class="bi bi-files me-2" aria-hidden="true"></span>Copia tabelle</h1>
+
+@if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+{
+    <div class="alert alert-warning">Sezione riservata agli amministratori.</div>
+    return;
+}
+
+<p class="text-muted">
+    Copia struttura e dati delle tabelle da un database SQL Server a un altro. Le connessioni indicate qui non vengono salvate.
+    Quando la tabella viene creata nella destinazione si copiano solo colonne e tipi: chiavi, indici, vincoli e trigger vanno ricreati a parte.
+</p>
+
+<div class="mb-3" style="max-width: 420px;">
+    <label class="form-label small" for="attiva">Connessione attiva (@Sessione.Profilo)</label>
+    <select id="attiva" class="form-select form-select-sm" @onchange="ImpostaConnessioneAttiva" disabled="@isBusy">
+        <option value="">Non usarla: inserisco entrambe le connessioni</option>
+        <option value="origine">Usala come origine</option>
+        <option value="destinazione">Usala come destinazione</option>
+    </select>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-6"><ParametriConnessioneForm Titolo="Origine" Parametri="origine" Disabilitato="isBusy" /></div>
+    <div class="col-lg-6"><ParametriConnessioneForm Titolo="Destinazione" Parametri="destinazione" Disabilitato="isBusy" /></div>
+</div>
+
+<div class="d-flex flex-wrap gap-2 align-items-end mb-3">
+    <button type="button" class="btn btn-outline-primary" @onclick="CaricaTabelleAsync" disabled="@isBusy">Carica tabelle dall'origine</button>
+    <div>
+        <label class="form-label small mb-0" for="modalita">Modalità</label>
+        <select id="modalita" class="form-select" @bind="modalita" disabled="@isBusy">
+            <option value="@ModalitaCopia.Aggiungi">Aggiungi righe (crea la tabella se manca)</option>
+            <option value="@ModalitaCopia.Sostituisci">Sostituisci righe (crea la tabella se manca)</option>
+            <option value="@ModalitaCopia.Ricrea">Ricrea tabella (elimina e ricrea)</option>
+        </select>
+    </div>
+    @if (isBusy)
+    {
+        <button type="button" class="btn btn-outline-danger" @onclick="() => cts?.Cancel()">Interrompi</button>
+    }
+    else
+    {
+        <button type="button" class="btn btn-primary" @onclick="CopiaAsync" disabled="@(!selezionate.Any())">
+            Copia @selezionate.Count tabelle
+        </button>
+    }
+</div>
+
+@if (errore is not null)
+{
+    <div class="alert alert-danger">@errore</div>
+}
+
+@if (tabelle.Count > 0)
+{
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr>
+                <th style="width: 3rem;">
+                    <input type="checkbox" class="form-check-input" checked="@(selezionate.Count == tabelle.Count)"
+                           @onchange="e => SelezionaTutte(e.Value is true)" disabled="@isBusy" />
+                </th>
+                <th>Tabella</th>
+                <th class="text-end">Righe (origine)</th>
+                <th>Esito</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var tabella in tabelle)
+            {
+                <tr>
+                    <td>
+                        <input type="checkbox" class="form-check-input" checked="@selezionate.Contains(tabella)"
+                               @onchange="e => Seleziona(tabella, e.Value is true)" disabled="@isBusy" />
+                    </td>
+                    <td class="font-monospace small">@tabella.NomeCompleto</td>
+                    <td class="text-end small">@tabella.Righe.ToString("N0")</td>
+                    <td class="small">
+                        @if (esiti.TryGetValue(tabella, out var esito))
+                        {
+                            <span class="@esito.Classe">@esito.Testo</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private sealed record Esito(string Testo, string Classe);
+
+    // Solo in memoria: non vengono mai salvati
+    private readonly ParametriConnessione origine = new();
+    private readonly ParametriConnessione destinazione = new();
+
+    private IReadOnlyList<TabellaSorgente> tabelle = [];
+    private readonly HashSet<TabellaSorgente> selezionate = [];
+    private readonly Dictionary<TabellaSorgente, Esito> esiti = [];
+    private ModalitaCopia modalita = ModalitaCopia.Aggiungi;
+    private CancellationTokenSource? cts;
+    private string? errore;
+    private bool isBusy;
+
+    private void ImpostaConnessioneAttiva(ChangeEventArgs e)
+    {
+        origine.Svuota();
+        destinazione.Svuota();
+        tabelle = [];
+        selezionate.Clear();
+        esiti.Clear();
+
+        var scelta = e.Value?.ToString();
+        if (scelta is "origine" or "destinazione" && Sessione.Profilo is { } profilo && Sessione.ConnectionString is { } connectionString)
+            (scelta == "origine" ? origine : destinazione).UsaProfilo(profilo, connectionString);
+    }
+
+    private async Task CaricaTabelleAsync()
+    {
+        errore = null;
+        isBusy = true;
+        try
+        {
+            tabelle = await Copia.ElencoTabelleAsync(origine);
+            selezionate.Clear();
+            esiti.Clear();
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException or ArgumentException)
+        {
+            errore = $"Impossibile leggere le tabelle dell'origine: {ex.Message}";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void Seleziona(TabellaSorgente tabella, bool selezionata)
+    {
+        if (selezionata)
+            selezionate.Add(tabella);
+        else
+            selezionate.Remove(tabella);
+    }
+
+    private void SelezionaTutte(bool selezionata)
+    {
+        selezionate.Clear();
+        if (selezionata)
+            selezionate.UnionWith(tabelle);
+    }
+
+    private async Task CopiaAsync()
+    {
+        if (string.Equals(origine.ConnectionString, destinazione.ConnectionString, StringComparison.OrdinalIgnoreCase))
+        {
+            errore = "Origine e destinazione coincidono.";
+            return;
+        }
+
+        errore = null;
+        isBusy = true;
+        cts = new CancellationTokenSource();
+        try
+        {
+            foreach (var tabella in tabelle.Where(selezionate.Contains))
+            {
+                esiti[tabella] = new Esito("In corso…", "text-muted");
+                StateHasChanged();
+                try
+                {
+                    var progress = new Progress<long>(righe =>
+                    {
+                        esiti[tabella] = new Esito($"In corso… {righe:N0} righe", "text-muted");
+                        InvokeAsync(StateHasChanged);
+                    });
+                    var copiate = await Copia.CopiaAsync(origine, destinazione, tabella, modalita, progress, cts.Token);
+                    esiti[tabella] = new Esito($"Copiate {copiate:N0} righe", "text-success");
+                }
+                catch (OperationCanceledException)
+                {
+                    esiti[tabella] = new Esito("Interrotta: nessuna modifica applicata", "text-warning");
+                    break;
+                }
+                catch (Exception ex) when (ex is SqlException or InvalidOperationException or ArgumentException)
+                {
+                    esiti[tabella] = new Esito($"Errore: {ex.Message}", "text-danger");
+                }
+                StateHasChanged();
+            }
+        }
+        finally
+        {
+            isBusy = false;
+            cts.Dispose();
+            cts = null;
+        }
+    }
+
+    public void Dispose() => cts?.Cancel();
+}

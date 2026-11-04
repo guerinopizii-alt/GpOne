@@ -1,4 +1,4 @@
-.page {
+﻿.page {
     position: relative;
     display: flex;
     flex-direction: column;
@@ -96,3 +96,22 @@ main {
         right: 0.75rem;
         top: 0.5rem;
     }
+
+/* Menu laterale richiudibile (su schermi piccoli resta il menu a scomparsa del NavMenu) */
+.toggle-menu {
+    color: inherit;
+    font-size: 1.25rem;
+    padding: 0;
+}
+
+@media (max-width: 640.98px) {
+    .toggle-menu {
+        display: none;
+    }
+}
+
+@media (min-width: 641px) {
+    .page.menu-chiuso .sidebar {
+        display: none;
+    }
+}

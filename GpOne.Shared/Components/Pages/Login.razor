@@ -1,0 +1,212 @@
+﻿@page "/login"
+@layout GpOne.Components.Layout.EmptyLayout
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.Data.SqlClient
+@inject UserSessionService Sessione
+@inject ConnectionProfileStore Store
+@inject NavigationManager Navigation
+
+<PageTitle>Accesso</PageTitle>
+
+<div class="login-page">
+    <div class="login-card card shadow">
+        <div class="card-body p-4">
+            <h1 class="h3 mb-1"><span class="bi bi-person-circle me-2" aria-hidden="true"></span>GpOne</h1>
+            <p class="text-muted mb-4">
+                @(primoAvvio ? "Primo avvio: crea l'utente amministratore" : "Accedi con le tue credenziali")
+            </p>
+
+            @if (Sessione.Profili.Count > 0)
+            {
+                <EditForm Model="model" OnValidSubmit="SubmitAsync" FormName="login">
+                    <DataAnnotationsValidator />
+
+                    <div class="mb-3">
+                        <label class="form-label" for="profilo">Connessione</label>
+                        <InputSelect id="profilo" class="form-select"
+                                     Value="model.Profilo"
+                                     ValueChanged="@((string v) => CambiaProfiloAsync(v))"
+                                     ValueExpression="() => model.Profilo"
+                                     disabled="@isBusy">
+                            @foreach (var profilo in Sessione.Profili)
+                            {
+                                <option value="@profilo">@profilo</option>
+                            }
+                        </InputSelect>
+                        @if (Store.Get(model.Profilo) is { } dettaglio)
+                        {
+                            <div class="form-text">
+                                <span class="bi bi-database me-1" aria-hidden="true"></span>@dettaglio.Server / @dettaglio.Database
+                            </div>
+                        }
+                    </div>
+
+                    @if (!daInizializzare)
+                    {
+                    <div class="mb-3">
+                        <label class="form-label" for="username">Nome utente</label>
+                        <InputText id="username" class="form-control" @bind-Value="model.Username" autocomplete="username" />
+                        <ValidationMessage For="() => model.Username" />
+                    </div>
+
+                    @if (primoAvvio)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label" for="email">Email</label>
+                            <InputText id="email" type="email" class="form-control" @bind-Value="model.Email" autocomplete="email" />
+                        </div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label" for="password">Password</label>
+                        <InputText id="password" type="password" class="form-control" @bind-Value="model.Password"
+                                   autocomplete="@(primoAvvio ? "new-password" : "current-password")" />
+                        <ValidationMessage For="() => model.Password" />
+                    </div>
+
+                    @if (primoAvvio)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label" for="conferma">Conferma password</label>
+                            <InputText id="conferma" type="password" class="form-control" @bind-Value="model.ConfermaPassword" autocomplete="new-password" />
+                        </div>
+                    }
+
+                    @if (errore is not null)
+                    {
+                        <div class="alert alert-danger small">@errore</div>
+                    }
+
+                    <button type="submit" class="btn btn-primary w-100" disabled="@isBusy">
+                        @if (isBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                        }
+                        @(primoAvvio ? "Crea amministratore e accedi" : "Accedi")
+                    </button>
+                    }
+                </EditForm>
+
+                @if (daInizializzare)
+                {
+                    <div class="alert alert-warning small">
+                        Il database di questa connessione non è ancora inizializzato: esegui gli script di creazione delle tabelle.
+                    </div>
+                    <InizializzaDatabase @key="model.Profilo" Profilo="@model.Profilo" OnCompleted="VerificaPrimoAvvioAsync" />
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private const string DatabaseNonRaggiungibile = "Impossibile contattare il database oppure database non inizializzato. Contattare l'amministratore.";
+
+    private readonly LoginModel model = new();
+    private string? errore;
+    private bool primoAvvio;
+    private bool daInizializzare;
+    private bool isBusy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Nessuna connessione definita: si parte dalla configurazione iniziale
+        if (Sessione.Profili.Count == 0)
+        {
+            Navigation.NavigateTo("configurazione");
+            return;
+        }
+
+        model.Profilo = Sessione.Profili[0];
+        await VerificaPrimoAvvioAsync();
+    }
+
+    private async Task CambiaProfiloAsync(string profilo)
+    {
+        model.Profilo = profilo;
+        await VerificaPrimoAvvioAsync();
+    }
+
+    private async Task VerificaPrimoAvvioAsync()
+    {
+        errore = null;
+        daInizializzare = false;
+        try
+        {
+            primoAvvio = await Sessione.ContaUtentiAsync(model.Profilo) == 0;
+        }
+        // 208: tabella inesistente; 4060: database inesistente
+        catch (SqlException ex) when (ex.Number is 208 or 4060)
+        {
+            primoAvvio = false;
+            daInizializzare = true;
+        }
+        catch (SqlException)
+        {
+            primoAvvio = false;
+            errore = DatabaseNonRaggiungibile;
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        errore = null;
+
+        if (primoAvvio)
+        {
+            if (string.IsNullOrWhiteSpace(model.Email))
+            {
+                errore = "Indicare l'email.";
+                return;
+            }
+            if (model.Password.Length < 8)
+            {
+                errore = "La password deve contenere almeno 8 caratteri.";
+                return;
+            }
+            if (model.Password != model.ConfermaPassword)
+            {
+                errore = "Le password non coincidono.";
+                return;
+            }
+        }
+
+        isBusy = true;
+        try
+        {
+            if (primoAvvio)
+            {
+                errore = await Sessione.CreaAmministratoreAsync(model.Profilo, model.Username.Trim(), model.Email!.Trim(), model.Password);
+                if (errore is not null)
+                    return;
+                primoAvvio = false;
+            }
+
+            errore = await Sessione.LoginAsync(model.Profilo, model.Username.Trim(), model.Password);
+            if (errore is null)
+                Navigation.NavigateTo("");
+        }
+        catch (SqlException)
+        {
+            errore = DatabaseNonRaggiungibile;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private class LoginModel
+    {
+        public string Profilo { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Indicare il nome utente.")]
+        public string Username { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Indicare la password.")]
+        public string Password { get; set; } = string.Empty;
+
+        public string? Email { get; set; }
+        public string? ConfermaPassword { get; set; }
+    }
+}

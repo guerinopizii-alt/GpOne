@@ -1,0 +1,77 @@
+﻿@* Campi di una connessione temporanea: i valori restano solo nel modello passato, non vengono salvati *@
+
+<div class="card h-100">
+    <div class="card-body">
+        <h2 class="h6 mb-3">@Titolo</h2>
+
+        @if (Parametri.NomeProfilo is not null)
+        {
+            <p class="small mb-2">
+                <span class="bi bi-database-check me-1" aria-hidden="true"></span>
+                Connessione attiva <strong>@Parametri.NomeProfilo</strong>: @Parametri.Descrizione
+            </p>
+        }
+        else
+        {
+
+        <div class="mb-2">
+            <label class="form-label small">Server</label>
+            <input class="form-control form-control-sm" @bind="Parametri.Server" placeholder="es. srv-sql01\SQLEXPRESS" disabled="@Disabilitato" />
+        </div>
+        <div class="mb-2">
+            <label class="form-label small">Database</label>
+            <input class="form-control form-control-sm" @bind="Parametri.Database" disabled="@Disabilitato" />
+        </div>
+        <div class="form-check mb-2">
+            <input id="@($"win-{Titolo}")" type="checkbox" class="form-check-input" @bind="Parametri.AutenticazioneWindows" disabled="@Disabilitato" />
+            <label class="form-check-label small" for="@($"win-{Titolo}")">Autenticazione Windows</label>
+        </div>
+        @if (!Parametri.AutenticazioneWindows)
+        {
+            <div class="row g-2 mb-2">
+                <div class="col">
+                    <label class="form-label small">Utente</label>
+                    <input class="form-control form-control-sm" @bind="Parametri.Utente" autocomplete="off" disabled="@Disabilitato" />
+                </div>
+                <div class="col">
+                    <label class="form-label small">Password</label>
+                    <input type="password" class="form-control form-control-sm" @bind="Parametri.Password" autocomplete="new-password" disabled="@Disabilitato" />
+                </div>
+            </div>
+        }
+        <div class="form-check form-check-inline small">
+            <input id="@($"enc-{Titolo}")" type="checkbox" class="form-check-input" @bind="Parametri.Encrypt" disabled="@Disabilitato" />
+            <label class="form-check-label" for="@($"enc-{Titolo}")">Crittografa</label>
+        </div>
+        <div class="form-check form-check-inline small">
+            <input id="@($"trust-{Titolo}")" type="checkbox" class="form-check-input" @bind="Parametri.TrustServerCertificate" disabled="@Disabilitato" />
+            <label class="form-check-label" for="@($"trust-{Titolo}")">Certificato attendibile</label>
+        </div>
+        }
+
+        <div class="mt-2 d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="TestAsync" disabled="@Disabilitato">Test</button>
+            @if (esito is not null)
+            {
+                <span class="small @(esitoPositivo ? "text-success" : "text-danger")">@esito</span>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Titolo { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public ParametriConnessione Parametri { get; set; } = default!;
+    [Parameter] public bool Disabilitato { get; set; }
+
+    private string? esito;
+    private bool esitoPositivo;
+
+    private async Task TestAsync()
+    {
+        esito = "Verifica…";
+        var errore = await CopiaTabelleService.TestAsync(Parametri);
+        esitoPositivo = errore is null;
+        esito = errore ?? "Connessione riuscita.";
+    }
+}

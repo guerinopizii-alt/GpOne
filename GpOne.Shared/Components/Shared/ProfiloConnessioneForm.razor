@@ -1,0 +1,153 @@
+@using System.ComponentModel.DataAnnotations
+@inject ConnectionProfileStore Store
+
+<EditForm Model="model" OnValidSubmit="SalvaAsync" FormName="profilo-connessione">
+    <DataAnnotationsValidator />
+
+    <div class="mb-3">
+        <label class="form-label" for="nome">Nome profilo</label>
+        <InputText id="nome" class="form-control" @bind-Value="model.Nome" placeholder="es. Produzione" />
+        <ValidationMessage For="() => model.Nome" />
+    </div>
+
+    <div class="row">
+        <div class="col-md-7 mb-3">
+            <label class="form-label" for="server">Server</label>
+            <InputText id="server" class="form-control" @bind-Value="model.Server" placeholder="es. srv-sql01\SQLEXPRESS" />
+            <ValidationMessage For="() => model.Server" />
+        </div>
+        <div class="col-md-5 mb-3">
+            <label class="form-label" for="database">Database</label>
+            <InputText id="database" class="form-control" @bind-Value="model.Database" />
+            <ValidationMessage For="() => model.Database" />
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <label class="form-label" for="utente">Utente SQL</label>
+            <InputText id="utente" class="form-control" @bind-Value="model.Utente" autocomplete="off" />
+            <ValidationMessage For="() => model.Utente" />
+        </div>
+        <div class="col-md-6 mb-3">
+            <label class="form-label" for="password">Password</label>
+            <InputText id="password" type="password" class="form-control" @bind-Value="model.Password" autocomplete="new-password"
+                       placeholder="@(IsModifica ? "Lasciare vuoto per non modificarla" : string.Empty)" />
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <div class="form-check">
+            <InputCheckbox id="encrypt" class="form-check-input" @bind-Value="model.Encrypt" />
+            <label class="form-check-label" for="encrypt">Crittografa la connessione</label>
+        </div>
+        <div class="form-check">
+            <InputCheckbox id="trust" class="form-check-input" @bind-Value="model.TrustServerCertificate" />
+            <label class="form-check-label" for="trust">Considera attendibile il certificato del server</label>
+        </div>
+    </div>
+
+    @if (messaggio is not null)
+    {
+        <div class="alert @(esitoPositivo ? "alert-success" : "alert-danger") small">@messaggio</div>
+    }
+
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-primary" @onclick="TestAsync" disabled="@isBusy">Test connessione</button>
+        <button type="submit" class="btn btn-primary" disabled="@isBusy">Salva</button>
+        @if (OnCancel.HasDelegate)
+        {
+            <button type="button" class="btn btn-link" @onclick="OnCancel">Annulla</button>
+        }
+    </div>
+</EditForm>
+
+@code {
+    /// <summary>Profilo da modificare; null per crearne uno nuovo.</summary>
+    [Parameter] public ProfiloConnessione? Profilo { get; set; }
+
+    [Parameter] public EventCallback<string> OnSaved { get; set; }
+
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private FormModel model = new();
+    private string? messaggio;
+    private bool esitoPositivo;
+    private bool isBusy;
+
+    private bool IsModifica => Profilo is not null;
+
+    protected override void OnParametersSet()
+    {
+        model = Profilo is null
+            ? new FormModel()
+            : new FormModel
+            {
+                Nome = Profilo.Nome,
+                Server = Profilo.Server,
+                Database = Profilo.Database,
+                Utente = Profilo.Utente,
+                Encrypt = Profilo.Encrypt,
+                TrustServerCertificate = Profilo.TrustServerCertificate
+            };
+        messaggio = null;
+    }
+
+    private ProfiloConnessione ToProfilo() =>
+        new(model.Nome, model.Server, model.Database, model.Utente, model.Encrypt, model.TrustServerCertificate);
+
+    private async Task<bool> TestInternoAsync()
+    {
+        isBusy = true;
+        try
+        {
+            var errore = await Store.TestAsync(ToProfilo(), model.Password, Profilo?.Nome);
+            esitoPositivo = errore is null;
+            messaggio = errore ?? "Connessione riuscita.";
+            return esitoPositivo;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task TestAsync() => await TestInternoAsync();
+
+    private async Task SalvaAsync()
+    {
+        if (!await TestInternoAsync())
+            return;
+
+        try
+        {
+            Store.Salva(ToProfilo(), model.Password, Profilo?.Nome);
+            model.Password = null;
+            await OnSaved.InvokeAsync(model.Nome);
+        }
+        catch (InvalidOperationException ex)
+        {
+            esitoPositivo = false;
+            messaggio = ex.Message;
+        }
+    }
+
+    private class FormModel
+    {
+        [Required(ErrorMessage = "Indicare il nome del profilo.")]
+        public string Nome { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Indicare il server.")]
+        public string Server { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Indicare il database.")]
+        public string Database { get; set; } = "GpOne";
+
+        [Required(ErrorMessage = "Indicare l'utente SQL.")]
+        public string Utente { get; set; } = string.Empty;
+
+        public string? Password { get; set; }
+        public bool Encrypt { get; set; } = true;
+        public bool TrustServerCertificate { get; set; } = true;
+    }
+}

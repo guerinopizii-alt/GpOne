@@ -1,0 +1,116 @@
+﻿@using Microsoft.Data.SqlClient
+@inject DatabaseSetupService Setup
+
+@if (stato is null && errore is null)
+{
+    <p class="text-muted"><span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Verifica dello stato del database…</p>
+}
+else
+{
+    @if (stato is not null)
+    {
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Script</th>
+                    <th>Stato</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var script in stato)
+                {
+                    <tr>
+                        <td class="font-monospace small">@script.Nome</td>
+                        <td>
+                            @if (script.Applicato)
+                            {
+                                <span class="badge text-bg-success">Applicato il @script.ApplicatoIl!.Value.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</span>
+                            }
+                            else
+                            {
+                                <span class="badge text-bg-warning">Da eseguire</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @foreach (var riga in log)
+    {
+        <div class="small text-muted">@riga</div>
+    }
+
+    @if (errore is not null)
+    {
+        <div class="alert alert-danger small mt-2">@errore</div>
+    }
+
+    <div class="d-flex gap-2 mt-3">
+        <button type="button" class="btn btn-primary" @onclick="EseguiAsync" disabled="@(isBusy || DaEseguire == 0)">
+            @if (isBusy)
+            {
+                <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+            }
+            Esegui script (@DaEseguire)
+        </button>
+        @if (OnCompleted.HasDelegate && DaEseguire == 0)
+        {
+            <button type="button" class="btn btn-success" @onclick="OnCompleted">Continua</button>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Profilo { get; set; } = string.Empty;
+
+    /// <summary>Se impostato, mostra "Continua" quando non restano script da eseguire.</summary>
+    [Parameter] public EventCallback OnCompleted { get; set; }
+
+    private IReadOnlyList<StatoScript>? stato;
+    private readonly List<string> log = [];
+    private string? errore;
+    private bool isBusy;
+
+    private int DaEseguire => stato?.Count(s => !s.Applicato) ?? 0;
+
+    protected override async Task OnParametersSetAsync() => await AggiornaStatoAsync();
+
+    private async Task AggiornaStatoAsync()
+    {
+        try
+        {
+            stato = await Setup.StatoAsync(Profilo);
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            errore = ex.Message;
+        }
+    }
+
+    private async Task EseguiAsync()
+    {
+        isBusy = true;
+        errore = null;
+        log.Clear();
+        try
+        {
+            var progress = new Progress<string>(messaggio =>
+            {
+                log.Add(messaggio);
+                InvokeAsync(StateHasChanged);
+            });
+            await Setup.EseguiAsync(Profilo, progress);
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            errore = $"Esecuzione interrotta: {ex.Message}";
+        }
+        finally
+        {
+            isBusy = false;
+            await AggiornaStatoAsync();
+        }
+    }
+}

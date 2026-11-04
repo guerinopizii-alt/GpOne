@@ -1,0 +1,410 @@
+﻿@page "/domande-ai"
+@using Microsoft.Data.SqlClient
+@inject DomandeAiService Servizio
+@inject DatiAiService Dati
+@inject UserSessionService Sessione
+
+<PageTitle>Domande AI</PageTitle>
+
+<h1><span class="bi bi-chat-square-text me-2" aria-hidden="true"></span>Domande AI</h1>
+
+@if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+{
+    <div class="alert alert-warning">Sezione riservata agli amministratori.</div>
+    return;
+}
+
+@if (messaggio is not null)
+{
+    <div class="alert @(esitoPositivo ? "alert-success" : "alert-danger")" style="white-space: pre-wrap;">@messaggio</div>
+}
+
+@if (inModifica is null)
+{
+    <p class="text-muted">
+        Domande pronte da usare in GpOne AI: per ognuna scegli le tabelle, le colonne e i filtri dei dati da inviare all'AI.
+        Sono disponibili tutte le tabelle e viste del database, escluse quelle di sistema di GpOne.
+    </p>
+    <button class="btn btn-primary mb-3" @onclick="Nuova"><span class="bi bi-plus-lg me-1" aria-hidden="true"></span>Nuova domanda</button>
+
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr><th>Titolo</th><th>Tabelle</th><th>Attiva</th><th></th></tr>
+        </thead>
+        <tbody>
+            @foreach (var domanda in elenco)
+            {
+                <tr>
+                    <td>@domanda.Titolo</td>
+                    <td class="small font-monospace">@string.Join(", ", domanda.Fonti.Select(f => f.Oggetto))</td>
+                    <td>@(domanda.Attiva ? "Sì" : "No")</td>
+                    <td class="text-end">
+                        <button class="btn btn-sm btn-outline-secondary" title="Modifica" @onclick="() => Modifica(domanda)"><span class="bi bi-pencil" aria-hidden="true"></span></button>
+                        <button class="btn btn-sm btn-outline-secondary" title="Duplica" @onclick="() => Duplica(domanda)"><span class="bi bi-copy" aria-hidden="true"></span></button>
+                        <button class="btn btn-sm btn-outline-danger" title="Elimina" @onclick="() => EliminaAsync(domanda)"><span class="bi bi-trash" aria-hidden="true"></span></button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else
+{
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label" for="titolo">Titolo</label>
+                <input id="titolo" class="form-control" @bind="inModifica.Titolo" placeholder="es. Fatturato per cliente dell'ultimo mese" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="testo">Domanda per l'AI</label>
+                <textarea id="testo" class="form-control" rows="3" @bind="inModifica.Testo"></textarea>
+            </div>
+            <div class="form-check mb-3">
+                <input id="attiva" type="checkbox" class="form-check-input" @bind="inModifica.Attiva" />
+                <label class="form-check-label" for="attiva">Attiva (visibile in GpOne AI)</label>
+            </div>
+            <div class="form-text mb-2">
+                Parametri: scrivi <code>{NomeParametro}</code> nel testo o nei filtri (es. <code>Cliente = {Cliente}</code>,
+                <code>DataDocumento &gt;= {DataDa}</code>); l'utente li compila quando usa la domanda.
+            </div>
+            <div class="mb-3">
+                <span class="form-label d-block small">Visibile ai ruoli (nessuno selezionato = tutti)</span>
+                @foreach (var ruolo in ruoliDisponibili)
+                {
+                    <label class="me-3 small">
+                        <input type="checkbox" class="form-check-input me-1" checked="@inModifica.Ruoli.Contains(ruolo)"
+                               @onchange="e => { inModifica.Ruoli.Remove(ruolo); if (e.Value is true) inModifica.Ruoli.Add(ruolo); }" />@ruolo
+                    </label>
+                }
+            </div>
+
+            <h2 class="h6">Dati da inviare</h2>
+            @if (colonneConsentite.Count == 0)
+            {
+                <div class="form-text mb-3">Il database collegato non contiene tabelle utilizzabili.</div>
+            }
+            else
+            {
+                <div class="row g-3 mb-3">
+                    @* Sinistra: tabelle, la casella include/esclude; clic sul nome per configurarla *@
+                    <div class="col-md-4">
+                        <input class="form-control form-control-sm mb-1" placeholder="Cerca per nome o descrizione…" @bind="filtroTabelle" @bind:event="oninput" />
+                        <div class="form-check form-switch small mb-2">
+                            <input id="soloSelezionate" type="checkbox" class="form-check-input" @bind="soloSelezionate" />
+                            <label class="form-check-label" for="soloSelezionate">Solo selezionate</label>
+                        </div>
+                        <div class="list-group" style="max-height: 420px; overflow-y: auto;">
+                            @foreach (var oggetto in colonneConsentite.Keys.Order().Where(Visibile))
+                            {
+                                var inclusa = Fonte(oggetto) is not null;
+                                <div class="list-group-item list-group-item-action d-flex align-items-center py-1 @(oggetto == tabellaSelezionata ? "active" : null)"
+                                     style="cursor: pointer;" @onclick="() => tabellaSelezionata = oggetto">
+                                    <input type="checkbox" class="form-check-input me-2 mt-0" checked="@inclusa"
+                                           @onclick:stopPropagation="true" @onchange="e => ImpostaTabella(oggetto, e.Value is true)" />
+                                    <div class="lh-sm">
+                                        <span class="small font-monospace">@oggetto</span>
+                                        @if (descrizioni.TryGetValue(oggetto, out var descrizione))
+                                        {
+                                            <div class="small opacity-75">@descrizione</div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                        <div class="form-text">Tabelle incluse: @inModifica.Fonti.Count</div>
+                    </div>
+
+                    @* Destra: campi, filtro e ordinamento della tabella selezionata *@
+                    <div class="col-md-8">
+                        @if (tabellaSelezionata is null)
+                        {
+                            <p class="text-muted small">Seleziona una tabella a sinistra per scegliere campi, filtro e ordinamento.</p>
+                        }
+                        else if (Fonte(tabellaSelezionata) is not { } fonteSelezionata)
+                        {
+                            <p class="small"><strong class="font-monospace">@tabellaSelezionata</strong> non è inclusa: spunta la casella per aggiungerla alla domanda.</p>
+                        }
+                        else
+                        {
+                            <h3 class="h6 font-monospace">@fonteSelezionata.Oggetto</h3>
+
+                            <div class="d-flex align-items-center gap-2 mb-1">
+                                <span class="small text-muted">Campi (nessuno selezionato = tutti)</span>
+                                <button type="button" class="btn btn-link btn-sm p-0" @onclick="() => fonteSelezionata.Colonne.Clear()">Tutti</button>
+                            </div>
+                            <div class="border rounded p-2 mb-2" style="max-height: 200px; overflow-y: auto;">
+                                @foreach (var colonna in colonneConsentite[fonteSelezionata.Oggetto])
+                                {
+                                    <div class="form-check">
+                                        <input id="@($"col-{colonna}")" type="checkbox" class="form-check-input" checked="@fonteSelezionata.Colonne.Contains(colonna)"
+                                               @onchange="e => ImpostaColonna(fonteSelezionata, colonna, e.Value is true)" />
+                                        <label class="form-check-label small" for="@($"col-{colonna}")">@colonna</label>
+                                    </div>
+                                }
+                            </div>
+
+                            <div class="small text-muted mb-1">Raggruppa per (GROUP BY)</div>
+                            <div class="border rounded p-2 mb-2" style="max-height: 160px; overflow-y: auto;">
+                                @foreach (var colonna in colonneConsentite[fonteSelezionata.Oggetto])
+                                {
+                                    <div class="form-check">
+                                        <input id="@($"grp-{colonna}")" type="checkbox" class="form-check-input" checked="@fonteSelezionata.Raggruppamento.Contains(colonna)"
+                                               @onchange="e => ImpostaRaggruppamento(fonteSelezionata, colonna, e.Value is true)" />
+                                        <label class="form-check-label small" for="@($"grp-{colonna}")">@colonna</label>
+                                    </div>
+                                }
+                            </div>
+
+                            <div class="d-flex align-items-center gap-2 mb-1">
+                                <span class="small text-muted">Totali</span>
+                                <button type="button" class="btn btn-link btn-sm p-0" @onclick="() => fonteSelezionata.Aggregati.Add(new Aggregato())">Aggiungi</button>
+                            </div>
+                            @foreach (var aggregato in fonteSelezionata.Aggregati)
+                            {
+                                <div class="row g-1 mb-1 align-items-center">
+                                    <div class="col-3">
+                                        <select class="form-select form-select-sm" @bind="aggregato.Funzione">
+                                            @foreach (var funzione in Aggregato.Funzioni)
+                                            {
+                                                <option value="@funzione">@funzione</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="col-4">
+                                        <select class="form-select form-select-sm" @bind="aggregato.Colonna">
+                                            <option value="">@(aggregato.Funzione == "COUNT" ? "(tutte le righe)" : "Scegli…")</option>
+                                            @foreach (var colonna in colonneConsentite[fonteSelezionata.Oggetto])
+                                            {
+                                                <option value="@colonna">@colonna</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="col-4">
+                                        <input class="form-control form-control-sm" placeholder="Nome (facoltativo)" @bind="aggregato.Alias" />
+                                    </div>
+                                    <div class="col-1 text-end">
+                                        <button type="button" class="btn btn-sm btn-link text-danger p-0" title="Rimuovi"
+                                                @onclick="() => fonteSelezionata.Aggregati.Remove(aggregato)"><span class="bi bi-x-lg" aria-hidden="true"></span></button>
+                                    </div>
+                                </div>
+                            }
+                            @if (fonteSelezionata.Raggruppamento.Count > 0 || fonteSelezionata.Aggregati.Count > 0)
+                            {
+                                <div class="form-text mb-2">Con raggruppamenti o totali vengono inviate solo le colonne raggruppate e i totali; i campi selezionati sopra sono ignorati.</div>
+                            }
+
+                            <div class="mb-2">
+                                <label class="form-label small mb-0">Filtro (WHERE)</label>
+                                <input class="form-control form-control-sm font-monospace" @bind="fonteSelezionata.Filtro" placeholder="es. DataDocumento >= DATEADD(MONTH, -1, GETDATE())" />
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-8">
+                                    <label class="form-label small mb-0">Ordinamento (ORDER BY)</label>
+                                    <input class="form-control form-control-sm font-monospace" @bind="fonteSelezionata.Ordinamento" placeholder="es. Totale DESC" />
+                                </div>
+                                <div class="col-4">
+                                    <label class="form-label small mb-0">Righe</label>
+                                    <select class="form-select form-select-sm" value="@(fonteSelezionata.MaxRighe?.ToString() ?? "")"
+                                            @onchange="e => fonteSelezionata.MaxRighe = int.TryParse(e.Value?.ToString(), out var n) ? n : null">
+                                        <option value="">Tutte</option>
+                                        <option value="100">Prime 100</option>
+                                        <option value="200">Prime 200</option>
+                                        @if (fonteSelezionata.MaxRighe is { } altro && altro is not (100 or 200))
+                                        {
+                                            <option value="@altro">Prime @altro</option>
+                                        }
+                                    </select>
+                                </div>
+                            </div>
+
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => AnteprimaAsync(fonteSelezionata)">Anteprima</button>
+                            @if (anteprime.TryGetValue(fonteSelezionata, out var anteprima))
+                            {
+                                <pre class="small bg-light border rounded p-2 mt-2 mb-0" style="max-height: 220px; overflow: auto;">@anteprima</pre>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-primary" @onclick="SalvaAsync" disabled="@isBusy">Salva</button>
+                <button type="button" class="btn btn-link" @onclick="() => inModifica = null">Annulla</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<DomandaAi> elenco = [];
+    private IReadOnlyDictionary<string, IReadOnlyList<string>> colonneConsentite = new Dictionary<string, IReadOnlyList<string>>();
+    private readonly Dictionary<FonteDati, string> anteprime = [];
+    private DomandaAi? inModifica;
+    private IReadOnlyList<string> ruoliDisponibili = [];
+    private string? messaggio;
+    private bool esitoPositivo;
+    private bool isBusy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+            return;
+        await EseguiAsync(async () =>
+        {
+            colonneConsentite = await Dati.ColonneAsync(soloConsentiti: false);
+            ruoliDisponibili = await Servizio.ElencoRuoliAsync();
+            descrizioni = await Dati.DescrizioniAsync();
+            elenco = await Servizio.ElencoAsync(soloAttive: false);
+        });
+    }
+
+    private void Nuova() => Apri(new DomandaAi());
+
+    // Si lavora su una copia: "Annulla" non deve modificare l'elenco
+    // Copia completa (tabelle, campi, filtri, totali, ruoli) come nuova domanda: viene salvata solo premendo Salva
+    private void Duplica(DomandaAi domanda)
+    {
+        Modifica(domanda);
+        inModifica!.Id = 0;
+        inModifica.Titolo = $"{domanda.Titolo} (copia)";
+        messaggio = "Copia della domanda: modificala e premi Salva per crearla.";
+        esitoPositivo = true;
+    }
+
+    private void Modifica(DomandaAi domanda) => Apri(new DomandaAi
+    {
+        Id = domanda.Id,
+        Titolo = domanda.Titolo,
+        Testo = domanda.Testo,
+        Attiva = domanda.Attiva,
+        Ruoli = [.. domanda.Ruoli],
+        Fonti = [.. domanda.Fonti.Select(f => new FonteDati
+        {
+            Oggetto = f.Oggetto, Colonne = [.. f.Colonne], Filtro = f.Filtro, Ordinamento = f.Ordinamento, MaxRighe = f.MaxRighe,
+            Raggruppamento = [.. f.Raggruppamento],
+            Aggregati = [.. f.Aggregati.Select(a => new Aggregato { Funzione = a.Funzione, Colonna = a.Colonna, Alias = a.Alias })]
+        })]
+    });
+
+    private string filtroTabelle = string.Empty;
+    private bool soloSelezionate;
+    private IReadOnlyDictionary<string, string> descrizioni = new Dictionary<string, string>();
+
+    // Filtro dell'elenco tabelle: ricerca su nome e descrizione, eventualmente solo le incluse
+    private bool Visibile(string oggetto) =>
+        (!soloSelezionate || Fonte(oggetto) is not null)
+        && (filtroTabelle.Length == 0
+            || oggetto.Contains(filtroTabelle, StringComparison.OrdinalIgnoreCase)
+            || (descrizioni.TryGetValue(oggetto, out var descrizione) && descrizione.Contains(filtroTabelle, StringComparison.OrdinalIgnoreCase)));
+    private string? tabellaSelezionata;
+
+    private FonteDati? Fonte(string oggetto) =>
+        inModifica?.Fonti.FirstOrDefault(f => string.Equals(f.Oggetto, oggetto, StringComparison.OrdinalIgnoreCase));
+
+    private static void ImpostaRaggruppamento(FonteDati fonte, string colonna, bool selezionata)
+    {
+        fonte.Raggruppamento.Remove(colonna);
+        if (selezionata)
+            fonte.Raggruppamento.Add(colonna);
+    }
+
+    private void ImpostaTabella(string oggetto, bool inclusa)
+    {
+        var esistente = Fonte(oggetto);
+        if (inclusa && esistente is null)
+            inModifica!.Fonti.Add(new FonteDati { Oggetto = oggetto });
+        else if (!inclusa && esistente is not null)
+        {
+            inModifica!.Fonti.Remove(esistente);
+            anteprime.Remove(esistente);
+        }
+        tabellaSelezionata = oggetto;
+    }
+
+    private void Apri(DomandaAi domanda)
+    {
+        inModifica = domanda;
+        tabellaSelezionata = domanda.Fonti.FirstOrDefault()?.Oggetto;
+        filtroTabelle = string.Empty;
+        soloSelezionate = domanda.Fonti.Count > 0;
+        anteprime.Clear();
+        messaggio = null;
+    }
+
+    private static void ImpostaColonna(FonteDati fonte, string colonna, bool selezionata)
+    {
+        fonte.Colonne.Remove(colonna);
+        if (selezionata)
+            fonte.Colonne.Add(colonna);
+    }
+
+    private async Task AnteprimaAsync(FonteDati fonte)
+    {
+        try
+        {
+            anteprime[fonte] = $"{DomandeAiService.CostruisciQuery(fonte)}\n\n{await Servizio.AnteprimaAsync(fonte)}";
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            anteprime[fonte] = $"Errore: {ex.Message}";
+        }
+    }
+
+    private async Task SalvaAsync()
+    {
+        if (string.IsNullOrWhiteSpace(inModifica!.Titolo) || string.IsNullOrWhiteSpace(inModifica.Testo))
+        {
+            esitoPositivo = false;
+            messaggio = "Indicare titolo e domanda.";
+            return;
+        }
+        if (inModifica.Fonti.Any(f => string.IsNullOrEmpty(f.Oggetto)))
+        {
+            esitoPositivo = false;
+            messaggio = "Scegliere la tabella per ogni fonte di dati, oppure rimuoverla.";
+            return;
+        }
+
+        await EseguiAsync(async () =>
+        {
+            await Servizio.SalvaAsync(inModifica);
+            elenco = await Servizio.ElencoAsync(soloAttive: false);
+            inModifica = null;
+            esitoPositivo = true;
+            messaggio = "Domanda salvata.";
+        });
+    }
+
+    private async Task EliminaAsync(DomandaAi domanda)
+    {
+        await EseguiAsync(async () =>
+        {
+            await Servizio.EliminaAsync(domanda.Id);
+            elenco = await Servizio.ElencoAsync(soloAttive: false);
+        });
+    }
+
+    private async Task EseguiAsync(Func<Task> azione)
+    {
+        isBusy = true;
+        try
+        {
+            await azione();
+        }
+        catch (SqlException ex) when (ex.Number == 208)
+        {
+            esitoPositivo = false;
+            messaggio = "Database da aggiornare: eseguire gli script da Sistema > Database.";
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            esitoPositivo = false;
+            messaggio = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+}

@@ -1,17 +1,40 @@
 ﻿@inherits LayoutComponentBase
+@implements IDisposable
+@using GpOne.Services
+@inject UserSessionService Sessione
+@inject AiSettingsStore AiStore
+@inject NavigationManager Navigation
 
-<div class="page">
+<div class="page @(menuChiuso ? "menu-chiuso" : null)">
     <div class="sidebar">
-        <NavMenu />
+        @if (caricato)
+        {
+            <NavMenu />
+        }
     </div>
 
     <main>
         <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+            <button type="button" class="btn btn-link toggle-menu me-auto" @onclick="() => menuChiuso = !menuChiuso"
+                    title="@(menuChiuso ? "Mostra menu" : "Nascondi menu")">
+                <span class="bi @(menuChiuso ? "bi-layout-sidebar" : "bi-layout-sidebar-inset")" aria-hidden="true"></span>
+            </button>
+            @if (Sessione.Utente is { } utente)
+            {
+                <span class="small">
+                    <span class="bi bi-person-circle me-1" aria-hidden="true"></span>@utente.NomeCompleto
+                    <span class="badge text-bg-light ms-1" title="Ambiente">@Sessione.Profilo</span>
+                </span>
+                <a class="btn btn-link btn-sm" href="cambia-password">Cambia password</a>
+                <button class="btn btn-link btn-sm" @onclick="Sessione.Logout">Esci</button>
+            }
         </div>
 
         <article class="content px-4">
-            @Body
+            @if (Sessione.IsAuthenticated && caricato)
+            {
+                @Body
+            }
         </article>
     </main>
 </div>
@@ -21,3 +44,29 @@
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    // Configurazione AI dell'utente (abilitazione e motore) letta dal database prima di mostrare le pagine
+    private bool caricato;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Sessione.Changed += OnSessionChanged;
+        if (Sessione.IsAuthenticated)
+            await AiStore.CaricaAsync();
+        caricato = true;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        // Senza utente autenticato si torna alla schermata di accesso
+        if (!Sessione.IsAuthenticated)
+            Navigation.NavigateTo("login");
+    }
+
+    private bool menuChiuso;
+
+    private void OnSessionChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Sessione.Changed -= OnSessionChanged;
+}

@@ -1,0 +1,103 @@
+@page "/dati-ai"
+@using Microsoft.Data.SqlClient
+@inject DatiAiService DatiAiServizio
+@inject UserSessionService Sessione
+
+<PageTitle>Dati per AI</PageTitle>
+
+<h1><span class="bi bi-table me-2" aria-hidden="true"></span>Dati per AI</h1>
+
+@if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+{
+    <div class="alert alert-warning">Sezione riservata agli amministratori.</div>
+}
+else
+{
+    <p class="text-muted">
+        Scegli le tabelle e le viste che l'assistente può consultare (solo in lettura) quando in GpOne AI è attivo "Usa dati del database".
+        La descrizione aiuta l'AI a capire il contenuto. Le tabelle di sistema di GpOne (utenti, password, log) non sono mai consultabili.
+        Consiglio: usa per il profilo di connessione un utente SQL con permessi di sola lettura.
+    </p>
+
+    @if (messaggio is not null)
+    {
+        <div class="alert @(esitoPositivo ? "alert-success" : "alert-danger")">@messaggio</div>
+    }
+
+    @if (oggetti is null)
+    {
+        <p class="text-muted">Caricamento…</p>
+    }
+    else
+    {
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th style="width: 3rem;">Usa</th>
+                    <th>Oggetto</th>
+                    <th>Tipo</th>
+                    <th>Descrizione per l'AI</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var oggetto in oggetti)
+                {
+                    <tr>
+                        <td><input type="checkbox" class="form-check-input" @bind="oggetto.Consentito" /></td>
+                        <td class="font-monospace small">@oggetto.NomeCompleto</td>
+                        <td class="small">@oggetto.Tipo</td>
+                        <td><input class="form-control form-control-sm" @bind="oggetto.Descrizione" disabled="@(!oggetto.Consentito)" /></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <button type="button" class="btn btn-primary" @onclick="SalvaAsync" disabled="@isBusy">Salva</button>
+    }
+}
+
+@code {
+    private IReadOnlyList<OggettoDatabase>? oggetti;
+    private string? messaggio;
+    private bool esitoPositivo;
+    private bool isBusy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+            return;
+
+        try
+        {
+            oggetti = await DatiAiServizio.ElencoOggettiAsync();
+        }
+        catch (SqlException ex) when (ex.Number == 208)
+        {
+            messaggio = "Database da aggiornare: eseguire gli script da Sistema > Database.";
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            messaggio = ex.Message;
+        }
+    }
+
+    private async Task SalvaAsync()
+    {
+        isBusy = true;
+        try
+        {
+            await DatiAiServizio.SalvaConsentitiAsync(oggetti!);
+            esitoPositivo = true;
+            messaggio = $"Oggetti abilitati: {oggetti!.Count(o => o.Consentito)}.";
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            esitoPositivo = false;
+            messaggio = ex.Message;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+}

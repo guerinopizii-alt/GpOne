@@ -1,0 +1,577 @@
+﻿@page "/intelligenza-artificiale"
+@using System.Text.Json
+@using Microsoft.Data.SqlClient
+@inject AiSettingsStore AiStore
+@inject GpOneAiService Ai
+@inject UserSessionService Sessione
+
+<PageTitle>Intelligenza artificiale</PageTitle>
+
+<h1><span class="bi bi-cpu me-2" aria-hidden="true"></span>Intelligenza artificiale</h1>
+
+@if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+{
+    <div class="alert alert-warning">Sezione riservata agli amministratori.</div>
+}
+else
+{
+    <p class="text-muted">
+        Configurazioni dei motori usati da GpOne AI: locali (sul server o sul PC) oppure online. La chiave API viene salvata cifrata e non è mai mostrata.
+        Solo gli utenti a cui è assegnata una configurazione (Sistema &gt; Utenti) possono usare GpOne AI.
+    </p>
+
+    @if (avviso is not null)
+    {
+        <div class="alert alert-warning">@avviso</div>
+    }
+
+    <div class="d-flex flex-wrap gap-2 align-items-end mb-3" style="max-width: 760px;">
+        <div class="flex-grow-1">
+            <label class="form-label" for="configurazione">Configurazione</label>
+            <select id="configurazione" class="form-select" value="@configurazioneId" @onchange="ScegliConfigurazioneAsync" disabled="@isBusy">
+                <option value="0">Nuova configurazione…</option>
+                @foreach (var configurazione in configurazioni)
+                {
+                    <option value="@configurazione.Id">@configurazione.Nome@(configurazione.Predefinita ? " (predefinita)" : "")</option>
+                }
+            </select>
+        </div>
+        @if (configurazioneId != 0)
+        {
+            <button type="button" class="btn btn-outline-danger" @onclick="EliminaAsync" disabled="@isBusy">
+                <span class="bi bi-trash me-1" aria-hidden="true"></span>Elimina
+            </button>
+        }
+    </div>
+
+    <div class="card" style="max-width: 760px;">
+        <div class="card-body">
+            <div class="row g-2 mb-3">
+                <div class="col-md-8">
+                    <label class="form-label" for="nomeConfigurazione">Nome</label>
+                    <input id="nomeConfigurazione" class="form-control" @bind="nome" placeholder="es. Ollama interno, Claude, Gemini UE" />
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <div class="form-check">
+                        <input id="predefinita" type="checkbox" class="form-check-input" @bind="predefinita" />
+                        <label class="form-check-label" for="predefinita">Predefinita</label>
+                    </div>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="provider">Motore</label>
+                <select id="provider" class="form-select" value="@model.Provider" @onchange="CambiaProvider">
+                    <option value="@AiProvider.Simulato">Simulato (nessuna AI)</option>
+                    <option value="@AiProvider.Ollama">Locale – Ollama</option>
+                    <option value="@AiProvider.OpenAiCompatibile">Locale/Online – compatibile OpenAI (LM Studio, vLLM, OpenAI…)</option>
+                    <option value="@AiProvider.Claude">Online – Anthropic Claude</option>
+                    <option value="@AiProvider.Gemini">Online – Google Gemini</option>
+                    <option value="@AiProvider.VertexAi">Online – Google Gemini su Vertex AI (regione UE)</option>
+                    <option value="@AiProvider.Microsoft365Copilot">Microsoft 365 Copilot (lavoro) – tenant aziendale</option>
+                </select>
+            </div>
+
+            @if (model.Provider is AiProvider.Ollama or AiProvider.OpenAiCompatibile)
+            {
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label" for="host">Computer</label>
+                        <input id="host" class="form-control" @bind="model.Host" placeholder="localhost, nome PC o indirizzo IP" />
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <label class="form-label" for="porta">Porta</label>
+                        <input id="porta" type="number" class="form-control" @bind="model.Porta" />
+                    </div>
+                    <div class="col-md-3 mb-3 d-flex align-items-end">
+                        <div class="form-check">
+                            <input id="https" type="checkbox" class="form-check-input" @bind="model.Https" />
+                            <label class="form-check-label" for="https">HTTPS</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-text mb-3">
+                    Endpoint: <code>@Endpoint</code>.
+                    Il computer deve essere raggiungibile dal server web (o dal PC, per l'app desktop):
+                    per Ollama su un altro PC impostare <code>OLLAMA_HOST=0.0.0.0</code> e aprire la porta nel firewall.
+                </div>
+            }
+
+            @if (model.Provider == AiProvider.VertexAi)
+            {
+                <div class="alert alert-info small">
+                    Elaborazione nella regione UE scelta, con i contratti e il DPA di Google Cloud.
+                    Serve un progetto Google Cloud con l'API Vertex AI attiva e un service account con ruolo "Vertex AI User":
+                    incolla qui la sua chiave JSON (viene salvata cifrata e non è più mostrata).
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="regione">Regione</label>
+                    <select id="regione" class="form-select" @bind="model.Regione">
+                        @foreach (var regione in AiImpostazioni.RegioniUe)
+                        {
+                            <option value="@regione.Key">@regione.Value</option>
+                        }
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="chiaveJson">Chiave JSON del service account</label>
+                    <textarea id="chiaveJson" class="form-control font-monospace small" rows="4" @bind="model.ApiKey" autocomplete="off"
+                              placeholder="@(haApiKey ? "Configurata – lasciare vuoto per non modificarla" : "{ \"type\": \"service_account\", ... }")"></textarea>
+                    @if (ProgettoEffettivo is { } progetto)
+                    {
+                        <div class="form-text">Progetto Google Cloud: @progetto</div>
+                    }
+                </div>
+            }
+
+            @if (model.Provider == AiProvider.Gemini)
+            {
+                <div class="alert alert-info small">
+                    Chiave API da Google AI Studio (aistudio.google.com). Per i dati aziendali verificare i termini d'uso:
+                    con i piani gratuiti Google può usare i contenuti per migliorare i propri servizi.
+                </div>
+            }
+
+            @if (model.Provider is AiProvider.OpenAiCompatibile or AiProvider.Claude or AiProvider.Gemini)
+            {
+                <div class="mb-3">
+                    <label class="form-label" for="apikey">Chiave API</label>
+                    <input id="apikey" type="password" class="form-control" @bind="model.ApiKey" autocomplete="new-password"
+                           placeholder="@(haApiKey ? "Configurata – lasciare vuoto per non modificarla" : string.Empty)" />
+                    @if (haApiKey)
+                    {
+                        <div class="form-check mt-1">
+                            <input id="rimuovi" type="checkbox" class="form-check-input" @bind="model.RimuoviApiKey" />
+                            <label class="form-check-label" for="rimuovi">Rimuovi la chiave salvata</label>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (model.Provider == AiProvider.Microsoft365Copilot)
+            {
+                <div class="alert alert-info small">
+                    Ogni utente accede con il proprio account aziendale e Copilot usa solo i dati a cui l'utente ha già accesso;
+                    i dati restano nel tenant Microsoft 365 (EU Data Boundary per i tenant europei).
+                    Servono la licenza Microsoft 365 Copilot e un'app registrata in Entra ID con "Consenti flussi client pubblici"
+                    e i permessi delegati Graph Sites.Read.All, Mail.Read, People.Read.All, OnlineMeetingTranscript.Read.All,
+                    Chat.Read, ChannelMessage.Read.All, ExternalItem.Read.All (con consenso amministratore).
+                    La Copilot Chat API è in anteprima: Microsoft non la supporta ancora in produzione.
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label" for="tenant">Tenant ID (facoltativo)</label>
+                        <input id="tenant" class="form-control" @bind="model.TenantId" />
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label" for="client">Client ID (app registrata)</label>
+                        <input id="client" class="form-control" @bind="model.ClientId" />
+                    </div>
+                </div>
+            }
+
+            @if (model.Provider is not (AiProvider.Simulato or AiProvider.Microsoft365Copilot))
+            {
+                <div class="mb-3">
+                    <label class="form-label" for="modello">Modello</label>
+                    <div class="input-group">
+                        <input id="modello" class="form-control" list="modelli" @bind="model.Modello" />
+                        @if (model.Provider is AiProvider.Ollama or AiProvider.OpenAiCompatibile or AiProvider.Gemini)
+                        {
+                            <button type="button" class="btn btn-outline-secondary" @onclick="CaricaModelliAsync" disabled="@isBusy">Carica modelli</button>
+                        }
+                    </div>
+                    <datalist id="modelli">
+                        @foreach (var nome in modelli)
+                        {
+                            <option value="@nome"></option>
+                        }
+                    </datalist>
+                    @if (modelli.Count > 0)
+                    {
+                        <div class="list-group mt-2" style="max-height: 240px; overflow-y: auto;">
+                            @foreach (var nome in modelli)
+                            {
+                                <button type="button" class="list-group-item list-group-item-action py-1 small @(nome == model.Modello ? "active" : null)"
+                                        @onclick="() => model.Modello = nome">
+                                    @nome
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label" for="system">Istruzioni di sistema</label>
+                    <textarea id="system" class="form-control" rows="3" @bind="model.SystemPrompt"></textarea>
+                </div>
+            }
+
+            @if (model.Provider != AiProvider.Simulato)
+            {
+                <div class="form-check form-switch mb-3">
+                    <input id="datiLiberi" type="checkbox" class="form-check-input" @bind="model.DatiLiberi" />
+                    <label class="form-check-label" for="datiLiberi">Consenti domande libere sui dati del database</label>
+                    <div class="form-text">
+                        Mostra in GpOne AI l'interruttore "Usa dati del database": l'AI propone le query, GpOne le verifica e le esegue
+                        in sola lettura sulle tabelle abilitate in "Dati per AI". Se disattivato, i dati si usano solo con le domande preparate.
+                    </div>
+                </div>
+
+                <div class="mb-3" style="max-width: 360px;">
+                    <label class="form-label" for="maxToken">Capacità del motore (token)</label>
+                    <input id="maxToken" type="number" class="form-control" min="0" step="1024" @bind="model.MaxTokenMotore"
+                           placeholder="@AiImpostazioni.TokenMotorePredefinito(model.Provider).ToString("N0")" />
+                    <div class="form-text">
+                        Prima di ogni invio GpOne stima i token e avvisa se si supera questo valore.
+                        0 = valore predefinito del motore (@AiImpostazioni.TokenMotorePredefinito(model.Provider).ToString("N0")).
+                        Per Ollama indicare il num_ctx del modello.
+                    </div>
+                </div>
+
+                <div class="mb-3" style="max-width: 360px;">
+                    <label class="form-label" for="maxDati">Dimensione massima dei dati inviati (caratteri)</label>
+                    <div class="form-check mb-1">
+                        <input id="senzaLimite" type="checkbox" class="form-check-input" checked="@(model.MaxCaratteriDati == AiImpostazioni.NessunLimite)"
+                               @onchange="e => model.MaxCaratteriDati = e.Value is true ? AiImpostazioni.NessunLimite : AiImpostazioni.MaxCaratteriPredefinito(model.Provider)" />
+                        <label class="form-check-label" for="senzaLimite">Nessun limite (vale solo quello del motore)</label>
+                    </div>
+                    @if (model.MaxCaratteriDati != AiImpostazioni.NessunLimite)
+                    {
+                        <input id="maxDati" type="number" class="form-control" min="1000" step="1000" @bind="model.MaxCaratteriDati" />
+                        <div class="form-text">
+                            Circa @((model.MaxCaratteriDati / 4).ToString("N0")) token: oltre questa soglia le righe in eccesso non vengono inviate.
+                            Consigliato per questo motore: @AiImpostazioni.MaxCaratteriPredefinito(model.Provider).ToString("N0").
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="form-text">Si invia tutto: se i dati superano la capacità del motore la richiesta può essere rifiutata o troncata.</div>
+                    }
+                </div>
+            }
+
+            @if (messaggio is not null)
+            {
+                <div class="alert @(esitoPositivo ? "alert-success" : "alert-danger") small" style="white-space: pre-wrap;">@messaggio</div>
+            }
+
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-outline-primary" @onclick="ProvaAsync" disabled="@isBusy">
+                    @if (isBusy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                    }
+                    Prova
+                </button>
+                <button type="button" class="btn btn-primary" @onclick="Salva" disabled="@isBusy">Salva</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly string[] ModelliClaude = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"];
+
+    private readonly FormModel model = new();
+    private IReadOnlyList<string> modelli = [];
+    private string? messaggio;
+    private bool esitoPositivo;
+    private bool isBusy;
+
+    private IReadOnlyList<ConfigurazioneAi> configurazioni = [];
+    private int configurazioneId;
+    private string nome = string.Empty;
+    private bool predefinita;
+    private bool haApiKey;
+    private string? apiKeySalvata;
+    private string? avviso;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Sessione.IsInRole(UserSessionService.RuoloAmministratore))
+            return;
+        await CaricaConfigurazioniAsync();
+        await ApriConfigurazioneAsync(configurazioni.FirstOrDefault(c => c.Predefinita) ?? configurazioni.FirstOrDefault());
+    }
+
+    private async Task CaricaConfigurazioniAsync()
+    {
+        try
+        {
+            configurazioni = await AiStore.ElencoAsync();
+            avviso = null;
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            configurazioni = [];
+            avviso = ex is SqlException { Number: 207 or 208 }
+                ? "Configurazioni AI non disponibili: eseguire lo script 11 da Sistema > Database."
+                : ex.Message;
+        }
+    }
+
+    private Task ScegliConfigurazioneAsync(ChangeEventArgs e) =>
+        ApriConfigurazioneAsync(configurazioni.FirstOrDefault(c => c.Id.ToString() == e.Value?.ToString()));
+
+    private async Task ApriConfigurazioneAsync(ConfigurazioneAi? configurazione)
+    {
+        configurazioneId = configurazione?.Id ?? 0;
+        nome = configurazione?.Nome ?? string.Empty;
+        predefinita = configurazione?.Predefinita ?? configurazioni.Count == 0;
+        haApiKey = configurazione?.Impostazioni.HaApiKey ?? false;
+        apiKeySalvata = configurazione is not null && haApiKey ? await AiStore.ApiKeyAsync(configurazione.Id) : null;
+        model.ApiKey = null;
+        model.RimuoviApiKey = false;
+        messaggio = null;
+        ApplicaImpostazioni(configurazione?.Impostazioni
+            ?? new AiImpostazioni(AiProvider.Simulato, string.Empty, string.Empty, AiImpostazioni.SystemPromptPredefinito, false));
+    }
+
+    private async Task EliminaAsync()
+    {
+        isBusy = true;
+        try
+        {
+            await AiStore.EliminaAsync(configurazioneId);
+            await CaricaConfigurazioniAsync();
+            await ApriConfigurazioneAsync(configurazioni.FirstOrDefault(c => c.Predefinita) ?? configurazioni.FirstOrDefault());
+            await AiStore.CaricaAsync();
+            (esitoPositivo, messaggio) = (true, "Configurazione eliminata: gli utenti che la usavano non sono più abilitati all'AI.");
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            (esitoPositivo, messaggio) = (false, ex.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void ApplicaImpostazioni(AiImpostazioni correnti)
+    {
+        model.Provider = correnti.Provider;
+        ImpostaEndpoint(correnti.Endpoint.Length > 0 ? correnti.Endpoint : AiImpostazioni.EndpointPredefinito(correnti.Provider));
+        model.Modello = correnti.Modello;
+        model.SystemPrompt = correnti.SystemPrompt;
+        model.TenantId = correnti.TenantId;
+        model.Regione = correnti.Regione ?? AiImpostazioni.RegioniUe.Keys.First();
+        model.ProgettoId = correnti.ProgettoId;
+        model.ClientId = correnti.ClientId;
+        model.DatiLiberi = correnti.DatiLiberi;
+        model.MaxCaratteriDati = correnti.MaxCaratteriDati;
+        model.MaxTokenMotore = correnti.MaxTokenMotore;
+        AggiornaModelliPredefiniti();
+    }
+
+    private void CambiaProvider(ChangeEventArgs e)
+    {
+        model.Provider = Enum.Parse<AiProvider>((string)e.Value!);
+        ImpostaEndpoint(AiImpostazioni.EndpointPredefinito(model.Provider));
+        model.Modello = AiImpostazioni.ModelloPredefinito(model.Provider);
+        model.MaxTokenMotore = 0;
+        if (model.MaxCaratteriDati != AiImpostazioni.NessunLimite)
+            model.MaxCaratteriDati = AiImpostazioni.MaxCaratteriPredefinito(model.Provider);
+        model.ApiKey = null;
+        messaggio = null;
+        AggiornaModelliPredefiniti();
+    }
+
+    // Endpoint compatibile OpenAI costruito da computer, porta e protocollo: http(s)://computer:porta/v1
+    private string Endpoint =>
+        model.Provider == AiProvider.Gemini ? AiImpostazioni.EndpointPredefinito(AiProvider.Gemini)
+        : model.Provider is AiProvider.Ollama or AiProvider.OpenAiCompatibile && !string.IsNullOrWhiteSpace(model.Host)
+            ? new UriBuilder(model.Https ? "https" : "http", model.Host.Trim(), model.Porta, "v1").Uri.ToString().TrimEnd('/')
+            : string.Empty;
+
+    private void ImpostaEndpoint(string endpoint)
+    {
+        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
+        {
+            model.Host = uri.Host;
+            model.Porta = uri.Port;
+            model.Https = uri.Scheme == Uri.UriSchemeHttps;
+        }
+        else
+        {
+            model.Host = null;
+            model.Porta = 0;
+            model.Https = false;
+        }
+    }
+
+    private static readonly string[] ModelliVertex = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"];
+
+    private void AggiornaModelliPredefiniti() =>
+        modelli = model.Provider switch
+        {
+            AiProvider.Claude => ModelliClaude,
+            AiProvider.VertexAi => ModelliVertex,
+            _ => []
+        };
+
+    // Progetto Google Cloud: dalla chiave appena incollata oppure da quello salvato
+    private string? ProgettoEffettivo => VertexAiAuth.ProgettoId(model.ApiKey) ?? model.ProgettoId;
+
+    private AiImpostazioni ToImpostazioni() =>
+        new(model.Provider, Endpoint, model.Modello ?? string.Empty,
+            string.IsNullOrWhiteSpace(model.SystemPrompt) ? AiImpostazioni.SystemPromptPredefinito : model.SystemPrompt,
+            HaApiKey: false, model.TenantId, model.ClientId, model.DatiLiberi,
+            model.Provider == AiProvider.VertexAi ? model.Regione : null,
+            model.Provider == AiProvider.VertexAi ? ProgettoEffettivo : null,
+            MaxCaratteriDati: model.MaxCaratteriDati <= AiImpostazioni.NessunLimite ? AiImpostazioni.NessunLimite : Math.Max(1000, model.MaxCaratteriDati),
+            MaxTokenMotore: Math.Max(0, model.MaxTokenMotore));
+
+    // Chiave da usare per le prove: quella digitata oppure, se vuota, quella salvata
+    private string? ApiKeyEffettiva() =>
+        !string.IsNullOrEmpty(model.ApiKey) ? model.ApiKey
+        : model.RimuoviApiKey ? null
+        : apiKeySalvata;
+
+    private async Task CaricaModelliAsync()
+    {
+        isBusy = true;
+        messaggio = null;
+        try
+        {
+            modelli = await Ai.ElencoModelliAsync(Endpoint, ApiKeyEffettiva());
+            esitoPositivo = modelli.Count > 0;
+            messaggio = modelli.Count > 0 ? $"Modelli disponibili: {modelli.Count}." : "Nessun modello trovato sull'endpoint.";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or UriFormatException or JsonException or KeyNotFoundException)
+        {
+            esitoPositivo = false;
+            messaggio = $"Impossibile leggere i modelli: {ex.Message}";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task ProvaAsync()
+    {
+        if (model.Provider == AiProvider.Microsoft365Copilot)
+        {
+            esitoPositivo = true;
+            messaggio = "Salva le impostazioni e prova dalla pagina GpOne AI: serve l'accesso con l'account Microsoft dell'utente.";
+            return;
+        }
+
+        isBusy = true;
+        messaggio = null;
+        try
+        {
+            var domanda = new ChatMessage(ChatRole.User, "Rispondi solo con: connessione riuscita.", DateTime.Now);
+            var risposta = new System.Text.StringBuilder();
+            await foreach (var parte in Ai.GetResponseStreamAsync(ToImpostazioni(), ApiKeyEffettiva(), [domanda]))
+                risposta.Append(parte);
+
+            esitoPositivo = true;
+            messaggio = $"Risposta del modello: {risposta.ToString().Trim()}";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            esitoPositivo = false;
+            messaggio = $"Prova non riuscita: {ex.Message}";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task Salva()
+    {
+        if (string.IsNullOrWhiteSpace(nome))
+        {
+            esitoPositivo = false;
+            messaggio = "Indicare il nome della configurazione.";
+            return;
+        }
+        if (model.Provider is AiProvider.Ollama or AiProvider.OpenAiCompatibile
+            && (string.IsNullOrWhiteSpace(model.Host) || model.Porta is < 1 or > 65535))
+        {
+            esitoPositivo = false;
+            messaggio = "Indicare il computer e una porta valida.";
+            return;
+        }
+        if (model.Provider == AiProvider.Microsoft365Copilot
+            && string.IsNullOrWhiteSpace(model.ClientId))
+        {
+            esitoPositivo = false;
+            messaggio = "Indicare il Client ID dell'app registrata in Entra ID.";
+            return;
+        }
+        // Tenant ID: GUID oppure dominio (es. azienda.it); vuoto = organizzazione dell'account
+        if (model.Provider == AiProvider.Microsoft365Copilot && !string.IsNullOrWhiteSpace(model.TenantId)
+            && !Guid.TryParse(model.TenantId.Trim(), out _) && !model.TenantId.Contains('.'))
+        {
+            esitoPositivo = false;
+            messaggio = "Tenant ID non valido: inserire il GUID del tenant, il dominio aziendale (es. azienda.it) oppure lasciarlo vuoto.";
+            return;
+        }
+        if (model.Provider == AiProvider.Microsoft365Copilot && !Guid.TryParse(model.ClientId?.Trim(), out _))
+        {
+            esitoPositivo = false;
+            messaggio = "Client ID non valido: deve essere il GUID \"ID applicazione (client)\" della registrazione in Entra ID.";
+            return;
+        }
+        if (model.Provider is not (AiProvider.Simulato or AiProvider.Microsoft365Copilot) && string.IsNullOrWhiteSpace(model.Modello))
+        {
+            esitoPositivo = false;
+            messaggio = "Indicare il modello.";
+            return;
+        }
+        if (model.Provider == AiProvider.VertexAi && ProgettoEffettivo is null)
+        {
+            esitoPositivo = false;
+            messaggio = "Incollare la chiave JSON del service account Google Cloud (deve contenere project_id).";
+            return;
+        }
+        if (model.Provider is AiProvider.Claude or AiProvider.Gemini or AiProvider.VertexAi && string.IsNullOrEmpty(ApiKeyEffettiva()))
+        {
+            esitoPositivo = false;
+            messaggio = $"Per {model.Provider} è necessaria la chiave API.";
+            return;
+        }
+
+        isBusy = true;
+        try
+        {
+            configurazioneId = await AiStore.SalvaAsync(configurazioneId, nome, predefinita, ToImpostazioni(), model.ApiKey, model.RimuoviApiKey);
+            await CaricaConfigurazioniAsync();
+            await ApriConfigurazioneAsync(configurazioni.FirstOrDefault(c => c.Id == configurazioneId));
+            // Aggiorna anche la configurazione dell'utente collegato, se è quella modificata
+            await AiStore.CaricaAsync();
+            (esitoPositivo, messaggio) = (true, "Configurazione salvata.");
+        }
+        catch (Exception ex) when (ex is SqlException or InvalidOperationException)
+        {
+            (esitoPositivo, messaggio) = (false, ex.Message);
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private class FormModel
+    {
+        public AiProvider Provider { get; set; }
+        public string? Host { get; set; }
+        public int Porta { get; set; }
+        public bool Https { get; set; }
+        public string? Modello { get; set; }
+        public string? SystemPrompt { get; set; }
+        public string? ApiKey { get; set; }
+        public bool RimuoviApiKey { get; set; }
+        public string? TenantId { get; set; }
+        public string? Regione { get; set; }
+        public string? ProgettoId { get; set; }
+        public string? ClientId { get; set; }
+        public bool DatiLiberi { get; set; }
+        public int MaxTokenMotore { get; set; }
+        public int MaxCaratteriDati { get; set; } = AiImpostazioni.MaxCaratteriDatiPredefinito;
+    }
+}
