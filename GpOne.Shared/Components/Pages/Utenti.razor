@@ -28,7 +28,7 @@
 
     <table class="table table-hover align-middle">
         <thead>
-            <tr><th>Utente</th><th>Nome</th><th>Email</th><th>Ruoli</th><th>GpOne AI</th><th>Stato</th><th>Ultimo accesso</th><th></th></tr>
+            <tr><th>Utente</th><th>Nome</th><th>Email</th><th>Ruoli</th><th>Gp-One AI</th><th>Stato</th><th>Ultimo accesso</th><th></th></tr>
         </thead>
         <tbody>
             @foreach (var utente in utenti.Where(Visibile))
@@ -103,7 +103,7 @@ else
                 <label class="form-check-label" for="attivo">Utente attivo</label>
             </div>
             <div class="mb-3" style="max-width: 360px;">
-                <label class="form-label small" for="aiUtente">GpOne AI</label>
+                <label class="form-label small" for="aiUtente">Gp-One AI</label>
                 <select id="aiUtente" class="form-select" value="@(inModifica.AiConfigurazioneId?.ToString() ?? "")"
                         @onchange="e => inModifica.AiConfigurazioneId = int.TryParse(e.Value?.ToString(), out var id) ? id : null">
                     <option value="">Non abilitato</option>

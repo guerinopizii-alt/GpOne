@@ -22,7 +22,7 @@
 @if (inModifica is null)
 {
     <p class="text-muted">
-        Domande pronte da usare in GpOne AI: per ognuna scegli le tabelle, le colonne e i filtri dei dati da inviare all'AI.
+        Domande pronte da usare in Gp-One AI: per ognuna scegli le tabelle, le colonne e i filtri dei dati da inviare all'AI.
         Sono disponibili tutte le tabelle e viste del database, escluse quelle di sistema di GpOne.
     </p>
     <button class="btn btn-primary mb-3" @onclick="Nuova"><span class="bi bi-plus-lg me-1" aria-hidden="true"></span>Nuova domanda</button>
@@ -62,7 +62,7 @@ else
             </div>
             <div class="form-check mb-3">
                 <input id="attiva" type="checkbox" class="form-check-input" @bind="inModifica.Attiva" />
-                <label class="form-check-label" for="attiva">Attiva (visibile in GpOne AI)</label>
+                <label class="form-check-label" for="attiva">Attiva (visibile in Gp-One AI)</label>
             </div>
             <div class="form-text mb-2">
                 Parametri: scrivi <code>{NomeParametro}</code> nel testo o nei filtri (es. <code>Cliente = {Cliente}</code>,

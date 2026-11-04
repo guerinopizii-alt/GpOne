@@ -11,19 +11,19 @@
 @inject ConversazioniService Conversazioni
 @inject IJSRuntime JS
 
-<PageTitle>GpOne AI</PageTitle>
+<PageTitle>Gp-One AI</PageTitle>
 
 @if (!AiStore.Abilitato)
 {
-    <h1>GpOne AI</h1>
-    <div class="alert alert-warning">@(AiStore.Avviso ?? "Non sei abilitato all'uso di GpOne AI: chiedi all'amministratore.")</div>
+    <h1>Gp-One AI</h1>
+    <div class="alert alert-warning">@(AiStore.Avviso ?? "Non sei abilitato all'uso di Gp-One AI: chiedi all'amministratore.")</div>
     return;
 }
 
 <div class="ai-chat-container">
     <div class="ai-chat-header">
         <div>
-            <h1 class="mb-0">GpOne AI</h1>
+            <h1 class="mb-0">Gp-One AI</h1>
             <small class="text-muted"><span class="bi bi-cpu me-1" aria-hidden="true"></span>@AiStore.Correnti.Descrizione</small>
         </div>
         @if (domande.Count > 0)
@@ -182,7 +182,7 @@
                 <div class="ai-chat-bubble">
                     @if (string.IsNullOrEmpty(streamingText))
                     {
-                        <span class="ai-chat-typing">@(statoDatabase ?? "GpOne AI sta scrivendo…")</span>
+                        <span class="ai-chat-typing">@(statoDatabase ?? "Gp-One AI sta scrivendo…")</span>
                     }
                     else
                     {
@@ -354,7 +354,7 @@
         }
         catch (Exception ex)
         {
-            errorMessage = $"Errore durante la comunicazione con GpOne AI: {ex.Message}";
+            errorMessage = $"Errore durante la comunicazione con Gp-One AI: {ex.Message}";
         }
         finally
         {

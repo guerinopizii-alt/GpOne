@@ -36,7 +36,8 @@ public record AiImpostazioni(
     string? Regione = null,
     string? ProgettoId = null,
     int MaxCaratteriDati = AiImpostazioni.MaxCaratteriDatiPredefinito,
-    int MaxTokenMotore = 0)
+    int MaxTokenMotore = 0,
+    bool Preavvio = false)
 {
     /// <summary>Dimensione massima predefinita dei dati inviati all'AI (circa 15.000 token).</summary>
     public const int MaxCaratteriDatiPredefinito = 60000;
@@ -52,7 +53,7 @@ public record AiImpostazioni(
     };
 
     public const string SystemPromptPredefinito =
-        "Sei GpOne AI, l'assistente dell'applicazione GpOne. Rispondi in italiano, in modo chiaro e conciso.";
+        "Sei Gp-One AI, l'assistente dell'applicazione Gp-One. Rispondi in italiano, in modo chiaro e conciso.";
 
     public static string EndpointPredefinito(AiProvider provider) => provider switch
     {
@@ -131,7 +132,7 @@ public class AiSettingsStore(UserSessionService sessione, IDataProtectionProvide
 {
     private const string Colonne =
         "Id, Nome, Predefinita, Provider, Endpoint, Modello, SystemPrompt, ApiKeyCifrata, TenantId, ClientId, " +
-        "DatiLiberi, Regione, ProgettoId, MaxCaratteriDati, MaxTokenMotore";
+        "DatiLiberi, Regione, ProgettoId, MaxCaratteriDati, MaxTokenMotore, Preavvio";
 
     private static readonly AiImpostazioni NonAbilitato =
         new(AiProvider.Simulato, string.Empty, string.Empty, AiImpostazioni.SystemPromptPredefinito, false);
@@ -227,10 +228,10 @@ public class AiSettingsStore(UserSessionService sessione, IDataProtectionProvide
             await using var command = new SqlCommand(id == 0
                 ? """
                   INSERT INTO dbo.AiConfigurazioni (Nome, Predefinita, Provider, Endpoint, Modello, SystemPrompt, ApiKeyCifrata,
-                      TenantId, ClientId, DatiLiberi, Regione, ProgettoId, MaxCaratteriDati, MaxTokenMotore)
+                      TenantId, ClientId, DatiLiberi, Regione, ProgettoId, MaxCaratteriDati, MaxTokenMotore, Preavvio)
                   OUTPUT INSERTED.Id
                   VALUES (@Nome, @Predefinita, @Provider, @Endpoint, @Modello, @SystemPrompt, @NuovaChiave,
-                      @TenantId, @ClientId, @DatiLiberi, @Regione, @ProgettoId, @MaxCaratteriDati, @MaxTokenMotore)
+                      @TenantId, @ClientId, @DatiLiberi, @Regione, @ProgettoId, @MaxCaratteriDati, @MaxTokenMotore, @Preavvio)
                   """
                 : """
                   UPDATE dbo.AiConfigurazioni
@@ -238,7 +239,7 @@ public class AiSettingsStore(UserSessionService sessione, IDataProtectionProvide
                       SystemPrompt = @SystemPrompt,
                       ApiKeyCifrata = CASE WHEN @Rimuovi = 1 THEN NULL WHEN @NuovaChiave IS NULL THEN ApiKeyCifrata ELSE @NuovaChiave END,
                       TenantId = @TenantId, ClientId = @ClientId, DatiLiberi = @DatiLiberi, Regione = @Regione, ProgettoId = @ProgettoId,
-                      MaxCaratteriDati = @MaxCaratteriDati, MaxTokenMotore = @MaxTokenMotore, DataModifica = SYSUTCDATETIME()
+                      MaxCaratteriDati = @MaxCaratteriDati, MaxTokenMotore = @MaxTokenMotore, Preavvio = @Preavvio, DataModifica = SYSUTCDATETIME()
                   OUTPUT INSERTED.Id
                   WHERE Id = @Id
                   """, connection, transaction);
@@ -297,10 +298,10 @@ public class AiSettingsStore(UserSessionService sessione, IDataProtectionProvide
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
         await using var command = new SqlCommand("""
             INSERT INTO dbo.AiConfigurazioni (Nome, Predefinita, Provider, Endpoint, Modello, SystemPrompt, ApiKeyCifrata,
-                TenantId, ClientId, DatiLiberi, Regione, ProgettoId, MaxCaratteriDati, MaxTokenMotore)
+                TenantId, ClientId, DatiLiberi, Regione, ProgettoId, MaxCaratteriDati, MaxTokenMotore, Preavvio)
             OUTPUT INSERTED.Id
             VALUES (N'Configurazione importata', 1, @Provider, @Endpoint, @Modello, @SystemPrompt, @NuovaChiave,
-                @TenantId, @ClientId, @DatiLiberi, @Regione, @ProgettoId, @MaxCaratteriDati, @MaxTokenMotore)
+                @TenantId, @ClientId, @DatiLiberi, @Regione, @ProgettoId, @MaxCaratteriDati, @MaxTokenMotore, @Preavvio)
             """, connection, transaction);
         command.Parameters.Add("@NuovaChiave", SqlDbType.NVarChar, -1).Value = (object?)legacy.ApiKeyCifrata ?? DBNull.Value;
         AggiungiParametri(command, new AiImpostazioni(
@@ -339,6 +340,7 @@ public class AiSettingsStore(UserSessionService sessione, IDataProtectionProvide
         command.Parameters.Add("@ProgettoId", SqlDbType.NVarChar, 200).Value = Testo(i.ProgettoId);
         command.Parameters.Add("@MaxCaratteriDati", SqlDbType.Int).Value = i.MaxCaratteriDati;
         command.Parameters.Add("@MaxTokenMotore", SqlDbType.Int).Value = i.MaxTokenMotore;
+        command.Parameters.Add("@Preavvio", SqlDbType.Bit).Value = i.Preavvio;
     }
 
     private static (ConfigurazioneAi Configurazione, string? ApiKeyCifrata) Leggi(SqlDataReader r)
@@ -348,7 +350,7 @@ public class AiSettingsStore(UserSessionService sessione, IDataProtectionProvide
         var impostazioni = new AiImpostazioni(
             Enum.TryParse<AiProvider>(r.GetString(3), out var provider) ? provider : AiProvider.Simulato,
             S(4) ?? string.Empty, S(5) ?? string.Empty, S(6) ?? AiImpostazioni.SystemPromptPredefinito, chiave is not null,
-            S(8), S(9), r.GetBoolean(10), S(11), S(12), r.GetInt32(13), r.GetInt32(14));
+            S(8), S(9), r.GetBoolean(10), S(11), S(12), r.GetInt32(13), r.GetInt32(14), r.GetBoolean(15));
         return (new ConfigurazioneAi(r.GetInt32(0), r.GetString(1), r.GetBoolean(2), impostazioni), chiave);
     }
 

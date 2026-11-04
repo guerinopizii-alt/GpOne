@@ -22,7 +22,7 @@
         <Nullable>enable</Nullable>
 
         <!-- Display name -->
-        <ApplicationTitle>GpOne</ApplicationTitle>
+        <ApplicationTitle>Gp-One</ApplicationTitle>
 
         <!-- App Identifier -->
         <ApplicationId>com.companyname.gpone.desktop</ApplicationId>

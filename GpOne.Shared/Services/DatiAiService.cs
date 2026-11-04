@@ -125,6 +125,7 @@ public class DatiAiService(UserSessionService sessione, GpOneAiService ai, AiSet
         }
 
         await transaction.CommitAsync(cancellationToken);
+        schemiInMemoria.Clear();
     }
 
     /// <summary>
@@ -143,13 +144,14 @@ public class DatiAiService(UserSessionService sessione, GpOneAiService ai, AiSet
 
             sql = await GeneraQueryAsync(history, schema, cancellationToken);
             if (sql is null)
-                return new ContestoDati(history, null);
+                return new ContestoDati(history, "L'AI non ha generato nessuna query per questa domanda: nessun dato letto dal database.");
 
             Verifica(sql, schema.Keys);
             var dati = await EseguiAsync(sql, cancellationToken);
             var (blocco, omesse) = BloccoDati("query generata dall'AI", sql, dati, MaxCaratteriDati);
 
-            var testo = $"{domanda}\n\n{blocco}\n\n{IstruzioniDati}";
+            // Domanda in fondo: se il contesto del motore (es. Ollama) è stretto viene troncato l'inizio, non la domanda
+            var testo = $"{blocco}\n\n{IstruzioniDati}\n\nDomanda: {domanda}";
             var avviso = omesse > 0 ? $"\n\nAttenzione: {omesse} righe non inviate per limite di dimensione." : string.Empty;
             return new ContestoDati(Sostituisci(history, testo), $"Query eseguita:\n{sql}\n\n{blocco}{avviso}", sql);
         }
@@ -177,7 +179,16 @@ public class DatiAiService(UserSessionService sessione, GpOneAiService ai, AiSet
 
             Se per rispondere servono dati di questi oggetti, rispondi SOLO con una singola istruzione SELECT T-SQL
             (con TOP {MaxRighe}, nomi completi di schema), senza spiegazioni e senza blocchi di codice.
-            Se non servono dati del database rispondi esattamente: NESSUNA
+            Fai calcolare il più possibile a SQL Server, così la risposta richiede poche righe:
+            - per totali, conteggi, medie, massimi e minimi usa SUM, COUNT, AVG, MAX, MIN, con GROUP BY se servono raggruppamenti;
+            - per classifiche ("i primi", "i maggiori") usa ORDER BY con un TOP adeguato;
+            - seleziona solo le colonne necessarie alla domanda, mai SELECT *;
+            - filtra con WHERE i soli dati pertinenti (periodo, cliente, stato…);
+            - dai alle colonne calcolate un alias chiaro (es. AS TotaleFatturato).
+            Restituisci righe di dettaglio solo se la domanda chiede proprio un elenco.
+            L'utente ha chiesto di usare i dati del database: se la domanda nomina una tabella o un argomento
+            (es. "la tabella clienti", "i clienti") associalo all'oggetto corrispondente dell'elenco e scrivi la query.
+            Rispondi esattamente NESSUNA solo se la domanda non riguarda nessuno di questi oggetti (es. un saluto).
             """;
 
         var risposta = new StringBuilder();
@@ -314,8 +325,27 @@ public class DatiAiService(UserSessionService sessione, GpOneAiService ai, AiSet
         return testo.ToString().TrimEnd();
     }
 
+    // Struttura degli oggetti abilitati, condivisa tra gli utenti dello stesso database: evita di rileggerla a ogni domanda.
+    // Si svuota quando si salva "Dati per AI" e scade comunque dopo 10 minuti (es. colonne aggiunte dagli script).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime Letto, Dictionary<string, string> Schema)> schemiInMemoria = new();
+    private static readonly TimeSpan DurataSchema = TimeSpan.FromMinutes(10);
+
+    /// <summary>Legge in anticipo la struttura degli oggetti abilitati (es. subito dopo l'accesso) per velocizzare la prima domanda.</summary>
+    public Task PreparaSchemaAsync(CancellationToken cancellationToken = default) => CaricaSchemaAsync(cancellationToken);
+
     /// <summary>Oggetti abilitati con le loro colonne, nel formato "schema.nome(col tipo, ...) -- descrizione".</summary>
-    private async Task<Dictionary<string, string>> CaricaSchemaAsync(CancellationToken cancellationToken) =>
+    private async Task<Dictionary<string, string>> CaricaSchemaAsync(CancellationToken cancellationToken)
+    {
+        var chiave = sessione.ConnectionString ?? throw new InvalidOperationException("Nessuna connessione al database attiva.");
+        if (schemiInMemoria.TryGetValue(chiave, out var voce) && DateTime.UtcNow - voce.Letto < DurataSchema)
+            return voce.Schema;
+
+        var schema = await LeggiSchemaAsync(cancellationToken);
+        schemiInMemoria[chiave] = (DateTime.UtcNow, schema);
+        return schema;
+    }
+
+    private async Task<Dictionary<string, string>> LeggiSchemaAsync(CancellationToken cancellationToken) =>
         (await LeggiColonneAsync(soloConsentiti: true, cancellationToken)).ToDictionary(
             c => c.Key,
             c => $"{c.Key}({string.Join(", ", c.Value.Colonne.Select(col => $"{col.Nome} {col.Tipo}"))})"

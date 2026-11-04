@@ -3,6 +3,8 @@
 @using GpOne.Services
 @inject UserSessionService Sessione
 @inject AiSettingsStore AiStore
+@inject GpOneAiService Ai
+@inject DatiAiService DatiAi
 @inject NavigationManager Navigation
 
 <div class="page @(menuChiuso ? "menu-chiuso" : null)">
@@ -53,8 +55,31 @@
     {
         Sessione.Changed += OnSessionChanged;
         if (Sessione.IsAuthenticated)
+        {
             await AiStore.CaricaAsync();
+            _ = PreriscaldaAiAsync();
+        }
         caricato = true;
+    }
+
+    /// <summary>
+    /// In background, subito dopo l'accesso: carica il modello Ollama e la struttura delle tabelle abilitate,
+    /// così la prima domanda a Gp-One AI è più rapida. Gli errori si ignorano: si ripresenteranno alla domanda.
+    /// </summary>
+    private async Task PreriscaldaAiAsync()
+    {
+        if (!AiStore.Abilitato || !AiStore.Correnti.Preavvio)
+            return;
+        var impostazioni = AiStore.Correnti;
+
+        async Task Ignora(Func<Task> azione)
+        {
+            try { await azione(); } catch { }
+        }
+
+        await Task.WhenAll(
+            Ignora(() => Ai.PreriscaldaAsync(impostazioni)),
+            impostazioni.DatiLiberi ? Ignora(() => DatiAi.PreparaSchemaAsync()) : Task.CompletedTask);
     }
 
     protected override void OnAfterRender(bool firstRender)

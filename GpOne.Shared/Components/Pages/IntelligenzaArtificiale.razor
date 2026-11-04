@@ -16,8 +16,8 @@
 else
 {
     <p class="text-muted">
-        Configurazioni dei motori usati da GpOne AI: locali (sul server o sul PC) oppure online. La chiave API viene salvata cifrata e non è mai mostrata.
-        Solo gli utenti a cui è assegnata una configurazione (Sistema &gt; Utenti) possono usare GpOne AI.
+        Configurazioni dei motori usati da Gp-One AI: locali (sul server o sul PC) oppure online. La chiave API viene salvata cifrata e non è mai mostrata.
+        Solo gli utenti a cui è assegnata una configurazione (Sistema &gt; Utenti) possono usare Gp-One AI.
     </p>
 
     @if (avviso is not null)
@@ -212,8 +212,17 @@ else
                     <input id="datiLiberi" type="checkbox" class="form-check-input" @bind="model.DatiLiberi" />
                     <label class="form-check-label" for="datiLiberi">Consenti domande libere sui dati del database</label>
                     <div class="form-text">
-                        Mostra in GpOne AI l'interruttore "Usa dati del database": l'AI propone le query, GpOne le verifica e le esegue
+                        Mostra in Gp-One AI l'interruttore "Usa dati del database": l'AI propone le query, Gp-One le verifica e le esegue
                         in sola lettura sulle tabelle abilitate in "Dati per AI". Se disattivato, i dati si usano solo con le domande preparate.
+                    </div>
+                </div>
+
+                <div class="form-check form-switch mb-3">
+                    <input id="preavvio" type="checkbox" class="form-check-input" @bind="model.Preavvio" />
+                    <label class="form-check-label" for="preavvio">Preavvio dopo l'accesso</label>
+                    <div class="form-text">
+                        Subito dopo l'accesso dell'utente prepara in background Gp-One AI, per rendere più rapida la prima domanda:
+                        con Ollama carica il modello in memoria (per 30 minuti); con le domande libere attive legge la struttura delle tabelle abilitate.
                     </div>
                 </div>
 
@@ -361,6 +370,7 @@ else
         model.DatiLiberi = correnti.DatiLiberi;
         model.MaxCaratteriDati = correnti.MaxCaratteriDati;
         model.MaxTokenMotore = correnti.MaxTokenMotore;
+        model.Preavvio = correnti.Preavvio;
         AggiornaModelliPredefiniti();
     }
 
@@ -420,7 +430,8 @@ else
             model.Provider == AiProvider.VertexAi ? model.Regione : null,
             model.Provider == AiProvider.VertexAi ? ProgettoEffettivo : null,
             MaxCaratteriDati: model.MaxCaratteriDati <= AiImpostazioni.NessunLimite ? AiImpostazioni.NessunLimite : Math.Max(1000, model.MaxCaratteriDati),
-            MaxTokenMotore: Math.Max(0, model.MaxTokenMotore));
+            MaxTokenMotore: Math.Max(0, model.MaxTokenMotore),
+            Preavvio: model.Preavvio);
 
     // Chiave da usare per le prove: quella digitata oppure, se vuota, quella salvata
     private string? ApiKeyEffettiva() =>
@@ -454,7 +465,7 @@ else
         if (model.Provider == AiProvider.Microsoft365Copilot)
         {
             esitoPositivo = true;
-            messaggio = "Salva le impostazioni e prova dalla pagina GpOne AI: serve l'accesso con l'account Microsoft dell'utente.";
+            messaggio = "Salva le impostazioni e prova dalla pagina Gp-One AI: serve l'accesso con l'account Microsoft dell'utente.";
             return;
         }
 
@@ -572,6 +583,7 @@ else
         public string? ClientId { get; set; }
         public bool DatiLiberi { get; set; }
         public int MaxTokenMotore { get; set; }
+        public bool Preavvio { get; set; }
         public int MaxCaratteriDati { get; set; } = AiImpostazioni.MaxCaratteriDatiPredefinito;
     }
 }

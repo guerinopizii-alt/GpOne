@@ -253,7 +253,7 @@ public class DomandeAiService(UserSessionService sessione, DatiAiService dati)
         IReadOnlyDictionary<string, string>? valori = null)
     {
         var query = new List<string>();
-        var testo = new System.Text.StringBuilder(history[^1].Text).AppendLine();
+        var testo = new System.Text.StringBuilder();
         var dettagli = new System.Text.StringBuilder();
 
         // Il limite di dimensione viene diviso tra le tabelle della domanda
@@ -282,8 +282,10 @@ public class DomandeAiService(UserSessionService sessione, DatiAiService dati)
             dettagli.AppendLine();
         }
 
+        // Domanda in fondo: se il contesto del motore (es. Ollama) è stretto viene troncato l'inizio, non la domanda
         if (domanda.Fonti.Count > 0)
-            testo.AppendLine().Append(DatiAiService.IstruzioniDati);
+            testo.AppendLine().AppendLine(DatiAiService.IstruzioniDati).AppendLine().Append("Domanda: ");
+        testo.Append(history[^1].Text);
 
         return new ContestoDati(
             [.. history.Take(history.Count - 1), history[^1] with { Text = testo.ToString().Trim() }],

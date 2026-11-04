@@ -16,7 +16,7 @@ public class GpOneAiService(AiSettingsStore store, IHttpClientFactory httpClient
     public IAsyncEnumerable<string> GetResponseStreamAsync(IReadOnlyList<ChatMessage> history, CancellationToken cancellationToken = default) =>
         store.Abilitato
             ? GetResponseStreamAsync(store.Correnti, store.GetApiKey(), history, cancellationToken)
-            : throw new InvalidOperationException("Non sei abilitato all'uso di GpOne AI.");
+            : throw new InvalidOperationException("Non sei abilitato all'uso di Gp-One AI.");
 
     /// <summary>Usa impostazioni esplicite (es. per provare la configurazione prima di salvarla).</summary>
     public IAsyncEnumerable<string> GetResponseStreamAsync(AiImpostazioni impostazioni, string? apiKey, IReadOnlyList<ChatMessage> history, CancellationToken cancellationToken = default) =>
@@ -32,6 +32,28 @@ public class GpOneAiService(AiSettingsStore store, IHttpClientFactory httpClient
             AiProvider.VertexAi => VertexAiAsync(impostazioni, apiKey, history, cancellationToken),
             _ => throw new InvalidOperationException($"Motore AI non supportato: {impostazioni.Provider}.")
         };
+
+    /// <summary>
+    /// Ollama: carica in memoria il modello (richiesta senza prompt all'API nativa) e ce lo tiene 30 minuti,
+    /// così la prima domanda non attende il caricamento. Per gli altri motori non fa nulla.
+    /// </summary>
+    public async Task PreriscaldaAsync(AiImpostazioni impostazioni, CancellationToken cancellationToken = default)
+    {
+        if (impostazioni.Provider != AiProvider.Ollama)
+            return;
+
+        // L'endpoint configurato è quello compatibile OpenAI (.../v1); l'API nativa sta alla radice
+        var radice = impostazioni.Endpoint.TrimEnd('/');
+        if (radice.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+            radice = radice[..^3];
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, Url(radice, "api/generate"))
+        {
+            Content = JsonContent.Create(new { model = impostazioni.Modello, keep_alive = "30m" })
+        };
+        using var response = await httpClientFactory.CreateClient(HttpClientName).SendAsync(request, cancellationToken);
+        await VerificaRispostaAsync(response, cancellationToken);
+    }
 
     /// <summary>Elenco dei modelli esposti da un endpoint compatibile OpenAI (GET /models).</summary>
     public async Task<IReadOnlyList<string>> ElencoModelliAsync(string endpoint, string? apiKey, CancellationToken cancellationToken = default)
