@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.VisualStudio.JavaScript.Sdk/1.0.2125207">
+  <PropertyGroup>
+    <!-- F5 in Visual Studio: dev server Angular con proxy verso GpOne.Api (proxy.conf.json) -->
+    <StartupCommand>npm start</StartupCommand>
+    <JavaScriptTestFramework>Vitest</JavaScriptTestFramework>
+    <!-- In Debug non si ricompila Angular a ogni build della soluzione; in Release sì (output in GpOne.Api/wwwroot) -->
+    <ShouldRunBuildScript Condition="'$(Configuration)' == 'Debug'">false</ShouldRunBuildScript>
+    <BuildCommand>npm run build</BuildCommand>
+    <BuildOutputFolder>$(MSBuildProjectDirectory)\..\GpOne.Api\wwwroot</BuildOutputFolder>
+  </PropertyGroup>
+</Project>

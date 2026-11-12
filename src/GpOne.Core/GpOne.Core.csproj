@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.1" />
+    <PackageReference Include="Microsoft.SqlServer.TransactSql.ScriptDom" Version="180.140.0" />
+    <!-- Dipendenza indiretta di Microsoft.Data.SqlClient: fissata a una versione corretta (GHSA-846f-f764-76mx, vulnerabili fino alla 9.0.20) -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.23" />
+  </ItemGroup>
+
+</Project>

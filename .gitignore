@@ -485,3 +485,11 @@ $RECYCLE.BIN/
 
 # Profili di connessione e chiavi di cifratura GpOne
 App_Data/
+
+# GpOne: build Angular copiata nell'API, cache Angular
+src/GpOne.Api/wwwroot/
+.angular/
+
+# GpOne: valori cifrati temporanei e log
+password-cifrata.txt
+[Ll]ogs/

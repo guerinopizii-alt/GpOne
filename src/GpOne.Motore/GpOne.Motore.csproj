@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Logica condivisa da GpOne.Api e GpOne.Desktop: prompt (solo struttura, mai dati), generatori Claude/Ollama,
+       ciclo domanda → SELECT → validazione → esecuzione. -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Anthropic" Version="13.7.0" />
+    <PackageReference Include="Google.Apis.Auth" Version="1.78.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GpOne.Core\GpOne.Core.csproj" />
+  </ItemGroup>
+
+</Project>

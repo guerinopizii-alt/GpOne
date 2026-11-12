@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- GpOne autonomo: si collega direttamente al SQL Server del cliente (senza API né agente).
+       All'AI vanno solo struttura abilitata e domanda, come nel web (logica condivisa in GpOne.Motore). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyTitle>GpOne Desktop</AssemblyTitle>
+    <!-- Dipendenze di ScottPlot.WinForms (OpenTK, SkiaSharp.Views) compilate per .NET Framework: funzionano, l'avviso è atteso -->
+    <NoWarn>$(NoWarn);NU1701</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <PackageReference Include="ScottPlot.WinForms" Version="5.1.59" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.18" />
+  </ItemGroup>
+
+  <!-- Se il restore (es. quello di Visual Studio) perde il riferimento a GpOne.Motore, mancano Anthropic, Google e System.Text.Json 10
+       e il programma fallisce solo a runtime: meglio fermare la build con un messaggio chiaro. -->
+  <Target Name="VerificaDipendenzeMotore" AfterTargets="ResolvePackageAssets">
+    <Error Condition="'@(RuntimeCopyLocalItems->WithMetadataValue('NuGetPackageId','Anthropic'))' == ''"
+           Text="Il restore di GpOne.Desktop non contiene le dipendenze di GpOne.Motore (Anthropic, System.Text.Json...). Chiudere Visual Studio, eliminare la cartella .vs della soluzione e riaprirla, oppure eseguire 'dotnet restore --force' sul progetto." />
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GpOne.Motore\GpOne.Motore.csproj" />
+    <ProjectReference Include="..\GpOne.Core\GpOne.Core.csproj" />
+  </ItemGroup>
+
+</Project>
